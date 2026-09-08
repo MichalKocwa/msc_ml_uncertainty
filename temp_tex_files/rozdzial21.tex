@@ -1,0 +1,134 @@
+
+
+\section{Types of uncertainty}
+\label{sec:types-of-uncertainty}
+
+The value obtained from the predictive model rarely reproduces the observed value exactly. The difference between the predicted and the ground truth values has two distinct sources, and separating them is the starting point for this entire work. Considering two test cases for which a regression model returns prediction intervals of the same width, in the first case, the training data are dense but scattered around the trend, while in the second one, the model extrapolates far beyond the range of the training data, the density being lower. A single interval width conceals this difference. The appropriate response applied to both cases fundamentally differs: collecting more data helps in the second case, but not in the first, where the amount of available data points exceeds the second one. Therefore, uncertainty must be classified by its source, and not merely by its magnitude.
+
+To precisely capture both sources, let the data be generated according to the model
+%
+\begin{equation}
+    y = f(x) + \varepsilon ,
+    \label{eq:generative-model}
+\end{equation}
+%
+
+where $f$ is the unknown target function and $\varepsilon$ is the noise component that appears in the observations. Uncertainty is introduced through two independent channels: through the noise $\varepsilon$, which no model can eliminate, and through the unknown function $f$, which the model must estimate from a finite amount of data. These two channels give rise to the two types of uncertainty discussed throughout this chapter~\cite{hullermeier2021, he2025}.
+\begin{itemize}
+    \item The first type is \emph{aleatoric uncertainty}, which stems from the randomness inherent in the data generation process. It cannot be reduced by collecting more observations. 
+    \item The second is \emph{epistemic uncertainty}, which is due to the limited knowledge of the model and can be reduced with sufficient data~\cite{kendall2017}. 
+\end{itemize}
+
+In the literature, one may come across a notation that equates \emph{data uncertainty} and \emph{model uncertainty} as synonyms for the aleatoric and epistemic types, respectively~\cite{he2025, gawlikowski2023}. To avoid ambiguity, this work adopts the terms aleatoric and epistemic as primary, while reserving the term \emph{model uncertainty} for a subtype of epistemic uncertainty in the sense introduced in Subsection~\ref{subsec:epistemic}.
+
+It should be noted that the boundary between the two types is not a property of the world, but rather of the chosen model. A source of variability that is aleatoric for one model can become epistemic for a richer model equipped with an additional feature~\cite{derkiureghian2009}. The distinction is therefore a modeling decision, made to indicate which portion of the total uncertainty can in practice be reduced. This pragmatic interpretation structures the subsequent discussion.
+
+% ---------------------------------------------------------------------
+\subsection{Aleatoric uncertainty}
+\label{subsec:aleatoric}
+
+The term \emph{aleatoric} comes from the Latin \emph{alea}, dice, and refers to uncertainty rooted in intrinsic randomness. Aleatoric uncertainty captures the noise inherent in the observations~\cite{kendall2017}. Because this noise belongs to the data generation process itself, it persists regardless of the number of collected examples. For this reason, it is also referred to as irreducible or statistical uncertainty. The altitude uncertainty has several sources. Sensor imprecision and measurement error distort the recorded values. Quantization discretizes a continuous quantity. Relevant features may be missing from the input vector, causing seemingly identical inputs to correspond to different target values. In classification, this same effect takes the form of class overlap, where a single region of the feature space is shared by more than one label. Another frequently cited source is the disagreement among data annotators. Two radiologists may contour the same lesion differently and no increase in the number of patients will eliminate this disagreement. Such cases show that aleatoric uncertainty reflects the data, rather than a deficiency of the model.In the regression formulation of Equation~\eqref{eq:generative-model}, the aleatoric uncertainty is carried by the noise term $\varepsilon$. Two cases are usually distinguished. In the homoscedastic case, the noise has a constant variance,
+%
+\begin{equation}
+    \varepsilon \sim \mathcal{N}\!\left(0, \sigma^2\right),
+    \label{eq:homoscedastic}
+\end{equation}
+%
+so each observation is equally noisy. In the \emph{heteroscedastic} case, the variance depends on the input,
+%
+\begin{equation}
+    \varepsilon(x) \sim \mathcal{N}\!\left(0, \sigma^2(x)\right),
+    \qquad
+    p(y \mid x) = \mathcal{N}\!\left(y;\, f(x),\, \sigma^2(x)\right),
+    \label{eq:heteroscedastic}
+\end{equation}
+%
+so some regions of the input space are inherently noisier than others. The heteroscedastic model is more general of the two. Heteroscedastic aleatoric uncertainty can be estimated directly with a network with two output heads: one for the predictive mean $\hat{\mu}_\theta(x)$, and the other for the predictive variance $\hat{\sigma}^2_\theta(x)$. The parameters are trained by minimizing the Gaussian negative log-likelihood,
+%
+\begin{equation}
+    \mathcal{L}(\theta)
+    = \frac{1}{N} \sum_{i=1}^{N}
+      \left[
+        \frac{\bigl(y_i - \hat{\mu}_\theta(x_i)\bigr)^2}
+             {2\,\hat{\sigma}^2_\theta(x_i)}
+        + \frac{1}{2}\,\log \hat{\sigma}^2_\theta(x_i)
+      \right] .
+    \label{eq:gaussian-nll}
+\end{equation}
+%
+This function has an intuitive interpretation, sometimes called \emph{learned attenuation}~\cite{kendall2017}. The first term is the squared error weighted by the inverse of the predicted variance, so the network can reduce the weight of a large error by using a high variance. The second term, $\tfrac{1}{2}\log \hat{\sigma}^2_\theta(x)$, penalizes this move and prevents the variance from growing without bound. Together, both terms force the network to report high variance only where the data truly justify it. A limiting case clarifies the connection to standard regression. If the variance is constant, the second term of Equation~\eqref{eq:gaussian-nll} becomes a constant, and the first reduces to a squared error. The objective function then simplifies to mean squared error (MSE). Standard regression with a squared-error loss function thus already assumes a homoscedastic Gaussian noise model, even if this assumption remains implicit. The variance head removes this assumption and allows the noise level to vary with input. In classification, the predictive distribution $p(y \mid x)$ is categorical, and the aleatoric uncertainty is quantified by its entropy,
+%
+\begin{equation}
+    H\!\left[p(y \mid x)\right]
+    = -\sum_{c=1}^{K} p(y = c \mid x)\,\log p(y = c \mid x) .
+    \label{eq:entropy}
+\end{equation}
+%
+Entropy is maximized when the classes are equally likely, which corresponds precisely to the situation of complete class overlap. It vanishes when all probability masses are assigned to a single class.
+
+\begin{figure}[htbp] % poprawić miejsce wykresu/podrozdzialu !!
+\centering
+\includegraphics[width=\textwidth]{rodzial2_rys/img2_1.png}
+\caption{Heteroscedastic aleatoric uncertainty evaluated on synthetic data (sine function with noise increasing with $x$). The predictive mean curve is shown with a $\pm 2\hat{\sigma}_\theta(x)$ band that widens as observation noise grows, alongside the training points. The band width reflects noise inherent to the data rather than a lack of observations.}
+\label{fig:heteroscedastic-aleatoric}
+\end{figure}
+
+
+% ---------------------------------------------------------------------
+\subsection{Epistemic uncertainty}
+\label{subsec:epistemic}
+
+The term \emph{epistemic} comes from the Greek \emph{episteme}, knowledge, and refers to uncertainty resulting from a lack thereof. Epistemic uncertainty captures the uncertainty about the model and can be eliminated with sufficient data~\cite{kendall2017}. If training data are dense, the model is well constrained and epistemic uncertainty is low, but in the case where there training set is lacking data, many different models remain consistent with the observations and epistemic uncertainty is high.A single point estimation of parameters cannot express this uncertainty. In an overparameterized network, many parameter sets fit the training data almost equally well. These sets agree in regions covered by the data and diverge outside them. A standard network returns the prediction of a single such set and does not determine that other, equally plausible sets would provide a different response. This is the mechanism behind the overconfidence of deterministic networks~\cite{he2025}.The Bayesian approach replaces a single estimate with a distribution over parameters. The prior distribution $p(\theta)$ encodes beliefs about the parameters before seeing any data. After observing the data set $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^{N}$, the posterior distribution follows from Bayes' theorem,
+%
+\begin{equation}
+    p(\theta \mid \mathcal{D})
+    = \frac{p(\mathcal{D} \mid \theta)\, p(\theta)}{p(\mathcal{D})} ,
+    \label{eq:bayes}
+\end{equation}
+%
+where $p(\mathcal{D} \mid \theta)$ is the likelihood and $p(\mathcal{D})$ is the normalization constant. The prediction at a new point $x^\ast$ is then obtained by marginalizing over the posterior distribution,
+%
+\begin{equation}
+    p(y^\ast \mid x^\ast, \mathcal{D})
+    = \int p(y^\ast \mid x^\ast, \theta)\,
+           p(\theta \mid \mathcal{D})\; \mathrm{d}\theta .
+    \label{eq:predictive}
+\end{equation}
+%
+Equation~\eqref{eq:predictive} averages the predictions in every set of parameters, weighting each by its posterior likelihood. The spread of this predictive distribution is a measure of epistemic uncertainty. Where plausible sets agree, the spread is small; where they diverge, they are large. Exact computation of the integral is intractable for neural networks, and the methods compared in Chapter~3 differ mainly in how they approximate it. Epistemic uncertainty itself admits a finer breakdown~\cite{hullermeier2021}. Let $\mathcal{F}$ denote the space of all functions mapping inputs to target values, and $\mathcal{H} \subseteq \mathcal{F}$—a smaller space realizable by the chosen model class. Three functions are of interest: the optimum $f^\ast$ in the space $\mathcal{F}$, the optimum $h^\ast$ in the space $\mathcal{H}$, and the function $\hat{h}$ actually learned from finite data. The differences between them separate two contributions. The difference between $f^\ast$ and $h^\ast$ is \emph{the uncertainty} of the model, which originates from restricting attention to $\mathcal{H}$ and corresponds to the bias of the model class. The difference between $h^\ast$ and $\hat{h}$ is \emph{the approximation uncertainty}, which arises from learning on a finite sample and corresponds to variance.Both contributions are reduced by different means. The approximation uncertainty decreases as the training set grows, in the usual sense of a reducible quantity. Model uncertainty does not behave this way; it is reduced only by enlarging the model class, for example, by choosing a deeper architecture. For highly flexible model classes used in deep learning, the space $\mathcal{H}$ is sufficiently expressive for $h^\ast$ to lie close to $f^\ast$, and it is usually assumed that the model uncertainty component is negligible~\cite{hullermeier2021}. This work adopts this assumption and focuses on parameter uncertainty, which the Bayesian methods in Chapter~3 aim to capture.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{rodzial2_rys/img2_2.png}
+    \caption{Epistemic uncertainty illustrated as function spread. Several function samples from the posterior distribution (e.g., Gaussian process or Monte Carlo dropout) evaluated on the synthetic sine dataset. The sampled curves overlap closely within the training range $[0, 6]$ and fan out significantly beyond it (in regions $[-2, 0]$ and $[6, 10]$), demonstrating the increase in epistemic uncertainty during extrapolation.}
+    \label{fig:epistemic-uncertainty}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{rodzial2_rys/img2_3_1.png}
+    \caption{Conceptual diagram of nested hypothesis spaces. The space $\mathcal{F}$ represents all functions, while $\mathcal{H}$ denotes functions realizable by the chosen model architecture. Points $f^*$, $h^*$, and $\hat{h}$ mark the true target function, the optimal model within $\mathcal{H}$, and the function actually learned from finite data, respectively. Adapted from Hüllermeier and Waegeman (2021), Fig.~4.}
+    \label{fig:hypothesis-spaces}
+\end{figure}
+
+Both types of uncertainty are not competing descriptions, but rather additive components of total predictive uncertainty. In the predictive model of this chapter, they are separated by the law of total variance,
+%
+\begin{equation}
+    \underbrace{\operatorname{Var}\!\left(y^\ast \mid x^\ast\right)}_{\text{total}}
+    =
+    \underbrace{\mathbb{E}_{p(\theta \mid \mathcal{D})}
+      \!\left[\sigma^2_\theta(x^\ast)\right]}_{\text{aleatoric}}
+    +
+    \underbrace{\operatorname{Var}_{p(\theta \mid \mathcal{D})}
+      \!\left(\mu_\theta(x^\ast)\right)}_{\text{epistemic}} .
+    \label{eq:total-variance}
+\end{equation}
+%
+The first term is the expected predicted noise variance and represents the aleatoric component. The second term is the variance of the predicted mean in the posterior distribution and represents the epistemic component. Equation~\eqref{eq:total-variance} provides an operational recipe used in Chapter~4 to separately report both contributions for each method.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{rodzial2_rys/img2_3.png}
+    \caption{Predictive uncertainty decomposition showing two nested bands: the inner band represents the aleatoric component, while the outer band represents the total uncertainty. The aleatoric component dominates in the center of the training range, whereas epistemic uncertainty dominates at the boundaries, illustrating the law of total variance from Equation~\eqref{eq:total-variance}.}
+    \label{fig:hypothesis-spaces}
+\end{figure}

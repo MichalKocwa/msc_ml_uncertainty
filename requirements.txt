@@ -1,0 +1,18 @@
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+pandas>=2.0
+
+scikit-learn>=1.3
+torch>=2.0
+# PyPI's latest laplace-torch is 0.2.2.2 — "0.2.3" (used by src/methods/laplace.py)
+# does not exist as a PyPI release, only as this git commit. `>=0.2.3` in a
+# plain requirements.txt is therefore silently unresolvable; pin the commit instead.
+laplace-torch @ git+https://github.com/aleximmer/Laplace.git@44ea62ac1f8cfd6f797f31c75e2cf34414fdddae
+curvlinops-for-pytorch==2.0.1  # this laplace-torch commit's kron backend calls a method curvlinops>=3.0 renamed; pin until upstream fixes it
+bayesian-torch>=0.5.0
+
+joblib>=1.3
+
+jupyterlab>=4.0
+ipykernel>=6.0

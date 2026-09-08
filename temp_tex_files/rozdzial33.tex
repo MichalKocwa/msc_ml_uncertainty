@@ -1,0 +1,202 @@
+\section{Monte Carlo dropout}
+\label{sec:mc-dropout}
+
+Section~\ref{sec:bayes-by-backprop} obtained an approximate posterior at the cost
+of doubling the number of stored parameters, while the Monte Carlo (MC) dropout (presented below) obtains one at no cost at all. Gal and Ghahramani showed that a network trained with dropout
+before every weight layer, together with $L_2$ regularisation, is already performing approximate variational inference; nothing in the training procedure needs to change, and the only modification occurs at test time~\cite{gal2016}. The method therefore belongs to the same family as Bayes by Backprop, and differs from it in a fact that the variational family is
+Bernoulli rather than Gaussian.
+
+The starting point is the objective minimized by an ordinary dropout network. For
+a model with $L$ weight layers, weight matrices $\mathbf{W}_i$, bias vectors
+$\mathbf{b}_i$ and a loss $E(\cdot,\cdot)$ such as the squared error, weight decay
+$\lambda$ gives
+%
+\begin{equation}
+    \mathcal{L}_{\mathrm{dropout}}
+    = \frac{1}{N} \sum_{n=1}^{N} E\bigl(y_n, \hat{y}_n\bigr)
+      + \lambda \sum_{i=1}^{L}
+        \left( \lVert \mathbf{W}_i \rVert_2^2
+             + \lVert \mathbf{b}_i \rVert_2^2 \right) .
+    \label{eq:dropout-objective}
+\end{equation}
+%
+Dropout itself is applied by sampling a binary vector for every unit of every
+layer and zeroing the corresponding rows of the weight matrix. Written as a
+distribution over the weights, this defines the variational family
+%
+\begin{equation}
+    \mathbf{W}_i = \mathbf{M}_i \operatorname{diag}
+      \bigl( [z_{i,j}]_{j=1}^{K_i} \bigr),
+    \qquad
+    z_{i,j} \sim \mathrm{Bernoulli}(p_i) ,
+    \label{eq:bernoulli-family}
+\end{equation}
+%
+in which the matrices $\mathbf{M}_i$ are the variational parameters and $p_i$ is
+the probability that a unit is retained~\cite{gal2016}. The contrast with the
+mean-field Gaussian family of Equation~\eqref{eq:mean-field} is sharp: each weight
+of Equation~\eqref{eq:bernoulli-family} takes one of two values, either $m_{i,jk}$
+or zero, so the approximate posterior is a discrete distribution rather than a
+continuous one.
+
+The central result of~\cite{gal2016} is that minimizing Equation~\eqref{eq:dropout-objective} is equivalent, up to a positive scaling constant, to minimizing the Kullback--Leibler divergence of
+Equation~\eqref{eq:vi-objective} between the family \eqref{eq:bernoulli-family} and the posterior of a deep Gaussian process marginalized over its covariance function parameters resulting in two steps of the derivation account for the two terms of Equation~\eqref{eq:dropout-objective}. The likelihood term of the evidence lower bound \eqref{eq:elbo} is estimated by Monte Carlo integration with a single sample per data point, which is precisely what a dropout mask provides per forward pass. The divergence from the prior admits, for a large number of hidden units, a closed-form approximation proportional to $\lVert \mathbf{M}_i \rVert_2^2$, recovering the weight-decay  term~\cite{gal2016appendix}.
+
+This result closes a loop opened in Section~\ref{sec:gaussian-processes} -the
+Gaussian process was introduced there as the reference method, the only one whose
+predictive distribution is exact; here it reappears as the model being approximated, this time in its deep variant. The practical consequence is stated clearly by the authors: epistemic information is already contained in a trained dropout network and has been discarded so far~\cite{gal2016} by the standard test-time procedure, and recovery of the information
+requires only that this procedure be replaced.
+
+% ---------------------------------------------------------------------
+\subsection{Prediction and uncertainty decomposition}
+\label{subsec:mc-dropout-prediction}
+
+At test time, an ordinary dropout network scales each weight matrix by its retention probability $p_i$ and performs one deterministic forward pass. MC dropout instead leaves the sampling switched on and performs $T$ stochastic passes, each with an independently drawn set of masks $\boldsymbol{\omega}^{(t)}$. The predictive mean is their average,
+%
+\begin{equation}
+    \hat{\mu}(x^\ast)
+    = \frac{1}{T} \sum_{t=1}^{T}
+      \hat{y}\bigl(x^\ast, \boldsymbol{\omega}^{(t)}\bigr) ,
+    \label{eq:mc-dropout-mean}
+\end{equation}
+%
+which is a Monte Carlo estimate of the marginalization in Equation~\eqref{eq:predictive-2}. It should be noted that Equation~\eqref{eq:mc-dropout-mean} is not itself a new proposal. Averaging
+several stochastic passes was already known as model averaging, and the  weight-scaling rule was justified empirically as an approximation to it. What Bayesian reading adds is a derivation, and with it access to the higher moments of the predictive distribution~\cite{gal2016}.
+
+The predictive variance follows by moment matching over the same $T$ samples,
+%
+\begin{equation}
+    \operatorname{Var}\!\left(y^\ast \mid x^\ast\right)
+    \approx
+    \underbrace{\tau^{-1}}_{\text{aleatoric}}
+    +
+    \underbrace{\frac{1}{T-1} \sum_{t=1}^{T}
+      \bigl( \hat{y}(x^\ast, \boldsymbol{\omega}^{(t)})
+             - \hat{\mu}(x^\ast) \bigr)^2}_{\text{epistemic}} ,
+    \label{eq:mc-dropout-variance}
+\end{equation}
+%
+where $\tau$ is the model precision, which is not a free parameter, but is
+fixed by the quantities already present in Equation~\eqref{eq:dropout-objective}, through the identity
+%
+\begin{equation}
+    \tau = \frac{p\, l^2}{2 N \lambda} ,
+    \label{eq:mc-dropout-precision}
+\end{equation}
+%
+in which $l$ is a prior length-scale expressing a belief about the frequency of the modeled function~\cite{gal2016appendix}. Equations \eqref{eq:mc-dropout-variance} and \eqref{eq:mc-dropout-precision} expose a limitation of the method in its original form. The aleatoric term is a single
+constant across the whole input space (what makes MC dropout a homoscedastic model) and the value of that constant is inherited from the dropout rate, the weight decay and a user-specified length-scale rather than estimated from the data. The situation mirrors the white-noise term of Equation~\eqref{eq:noisy-kernel} and the decomposition \eqref{eq:gp-variance-split}, with one difference: the former is fitted by maximising the marginal likelihood, whereas $\tau^{-1}$ is
+not fitted at all.
+
+A later modification of the method removes this limitation by combining dropout
+sampling with the two-headed network of
+Section~\ref{subsec:aleatoric}~\cite{kendall2017}.
+
+Each stochastic pass then returns a mean $\hat{\mu}_{\boldsymbol{\omega}^{(t)}}(x^\ast)$ and a variance
+$\hat{\sigma}^2_{\boldsymbol{\omega}^{(t)}}(x^\ast)$, the network is trained with the Gaussian negative logarithmic likelihood of Equation~\eqref{eq:gaussian-nll}, and the constant $\tau^{-1}$ of Equation~\eqref{eq:mc-dropout-variance} is replaced by an average of predicted noise variances,
+%
+\begin{equation}
+    \operatorname{Var}\!\left(y^\ast \mid x^\ast\right)
+    \approx
+    \underbrace{\frac{1}{T} \sum_{t=1}^{T}
+      \hat{\sigma}^2_{\boldsymbol{\omega}^{(t)}}(x^\ast)}_{\text{aleatoric}}
+    +
+    \underbrace{\frac{1}{T-1} \sum_{t=1}^{T}
+      \bigl( \hat{\mu}_{\boldsymbol{\omega}^{(t)}}(x^\ast)
+             - \hat{\mu}(x^\ast) \bigr)^2}_{\text{epistemic}} .
+    \label{eq:mc-dropout-heteroscedastic}
+\end{equation}
+%
+Equation~\eqref{eq:mc-dropout-heteroscedastic} is the empirical counterpart of
+Equation~\eqref{eq:total-variance-2} and is identical in form to the estimator
+\eqref{eq:bbb-variance-estimator} of Section~\ref{sec:bayes-by-backprop}. The
+aleatoric term is no longer inherited from the regularisation hyperparameters
+but read from a variance head trained by the objective of
+Equation~\eqref{eq:gaussian-nll}. The two variants of
+Equations~\eqref{eq:mc-dropout-variance}
+and~\eqref{eq:mc-dropout-heteroscedastic} therefore differ in how the aleatoric
+term is obtained, and the choice between them is a property of the noise model
+rather than of the posterior approximation.
+
+% Uwaga dla autora: Kendall i Gal zapisują człon epistemiczny w postaci
+% (1/T) sum y_t^2 - mu^2, czyli z dzielnikiem T. Powyżej użyto dzielnika T-1,
+% spójnie z Równaniem (bbb-variance-estimator) z Sekcji 3.2. Różnica jest
+% pomijalna dla używanych T, ale wybór trzeba zadeklarować raz w Rozdziale 4
+% i stosować dla wszystkich metod.
+
+The two terms behave differently as the test point moves away from the training
+data, and this behavior has been measured. Authors report that the mean aleatoric variance remains approximately constant when the training set is reduced or when the model is evaluated on an unrelated dataset, whereas the epistemic variance falls as the training set grows and rises sharply outside the distribution~\cite{kendall2017}. This is the empirical form of the distinction
+drawn in Section~\ref{subsec:epistemic}, and it is the property that Equation~\eqref{eq:mc-dropout-heteroscedastic} is meant to expose.
+
+%% ryas 3.6 do zmiany raczej - lekka zmiana teorii !!!!!!!!!!!!!!!!!!!!!!!!!
+% [Miejsce na Rysunek 3.6: posterior MC dropout na zbiorze load_sin.
+%  Trening na [0, 6], ewaluacja na [-2, 10]. TE SAME osie i ta sama skala co
+%  Rysunek 3.2 (posterior GP) i Rysunek 3.5 (posterior BBB) — trzy rysunki
+%  mają dać się porównać wzrokiem, to jest główny argument wizualny rozdziału.
+%  Predykcyjna średnia z Równania (mc-dropout-mean), pasmo +-2 sigma
+%  z pierwiastka Równania (mc-dropout-heteroscedastic), punkty treningowe,
+%  prawdziwa funkcja linią przerywaną. Opcjonalnie: 10-15 pojedynczych
+%  przebiegów cienką linią. Sieć: MLP z src/models.py z dropout > 0,
+%  z model.train() przy predykcji, T = 100 przebiegów.
+%  Cel rysunku: czy pasmo rozchodzi się poza zakresem treningowym, i o ile
+%  słabiej niż u GP.]
+
+\begin{figure}[htbp] 
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_6.png}
+    \caption{Predictive distribution of a network evaluated with Monte Carlo
+    dropout on the synthetic sine dataset. The model is trained on the interval
+    $[0, 6]$ and evaluated on $[-2, 10]$, with the axes matching those of
+    Figures~\ref{fig:gp-posterior-sine} and~\ref{fig:bbb-posterior-sine} to allow
+    a direct comparison. The band shows $\pm 2\sigma$ obtained from
+    Equation~\eqref{eq:mc-dropout-heteroscedastic} over $T$ stochastic forward
+    passes.}
+    \label{fig:mc-dropout-posterior-sine}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{Computational cost and limitations}
+\label{subsec:mc-dropout-limitations}
+
+The main adventage of the method is the fact that it does not require any additional parameters added to the network, so the storage doubling described in Section~\ref{subsec:bbb-limitations} does not occur, and an existing model trained with dropout can be re-evaluated without retraining~\cite{gal2016}. The cost appears in inference alone, where $T$ passes replace one. Gal and Ghahramani observe that the passes are independent and may be executed concurrently, which
+would leave the running time unchanged. Here, a qualification is due, and it comes from a later application of the method. Kendall and Gal report a fiftyfold slow-down for fifty samples on a dense architecture, and attribute it to memory constraints that prevent the passes from being parallelised~\cite{kendall2017}. The method is therefore free in parameters but not in evaluation time.
+
+The dropout rate is the more delicate issue - in Equation~\eqref{eq:bernoulli-family} the probability $p_i$ is a property of the variational family, and yet it is set by hand and held fixed throughout training. The spread of the approximate posterior is thus chosen rather than inferred. Two boundary cases make the point: at $p = 1$ the family collapses to a point mass and the method reduces to the MAP estimation of Section~\ref{subsec:mle-map}, while at $p = 0$ all the mass is placed at the origin~\cite{lefolgoc2021}. Gal and Ghahramani report that models initialized with rates of $0.1$ and $0.2$ differ in their uncertainty early in training, but become almost indistinguishable once converged~\cite{gal2016}. However, the rate is a hyperparameter that governs an uncertainty estimate, and it is treated as such in Chapter~\ref{ch:setup}.
+
+A second discrepancy separates the theory from common practice, the derivation requires dropout before every weight layer, whereas implementations frequently apply it to the final layers alone. This network interleaves MAP estimates in the layers without dropout with approximately Bayesian ones in the layers with it~\cite{gal2016appendix}. The uncertainty it reports is, consequently, not the uncertainty the derivation describes.
+
+The quality of the estimates is bounded by the same argument that justifies the method. Because a dropout network approximates a Gaussian process, it inherits the properties of that process, including the fact that its uncertainty is not calibrated~\cite{gal2016appendix}. Section~\ref{subsec:gp-kernel} noted that the choice of covariance function is a modeling assumption; under the present correspondence, that assumption is made by choosing a non-linearity. The effect is visible in extrapolation. Gal and Ghahramani observe that the uncertainty continues to grow away from the data for a ReLU network, whereas it remains bounded for a TanH network, because the two saturate differently and correspond to different covariance functions~\cite{gal2016}. The activation function is therefore not a neutral implementation detail once the uncertainty is the quantity of interest, which is why it is kept fixed across all methods in Chapter~\ref{ch:setup}.
+
+The strongest objection concerns the Bayesian status of the method itself. Le Folgoc et al.\ observe that the family \eqref{eq:bernoulli-family} places all its mass on a finite set of $2^P$ parameter configurations, obtained from a single vector $\hat{\theta}$ by zeroing subsets of its coordinates~\cite{lefolgoc2021}. Three consequences follow:
+\begin{itemize}
+    \item On a regression problem with a posterior available in closed form, the true parameter vector receives zero probability under the  approximation, as it does under MAP estimation and unlike any Gaussian family.
+    \item The multimodality of the approximate posterior, sometimes presented as an advantage over mean-field methods, is an artifact of this construction rather than a property of the target: the modes sit at the projections of $\hat{\theta}$ onto the coordinate hyperplanes, and their location carries no information about the data.
+    \item Since the whole distribution has one $P$-dimensional degree of freedom, it cannot represent a genuinely multimodal posterior
+\end{itemize}
+The authors propose reading MC dropout as a modification of the Bayesian model, by a sparsity-inducing prior, rather than as an approximation to it~\cite{lefolgoc2021}.
+
+This objection is not settled in the literature and the present work does not attempt to settle it. However, it does determine how the results are read. The quantity reported for MC dropout in Chapter~\ref{ch:results} is the empirical spread of $T$ stochastic passes, which remains well defined whichever interpretation is adopted; the claim that this spread approximates a posterior
+variance is the contested part . A concrete expectation can be attached to it: variational methods under-estimate posterior spread unless the true posterior belongs to the assumed family, and Gal and Ghahramani themselves report that on an interpolation task MC dropout was over-confident, while the Gaussian process over-estimated its interval~\cite{gal2016appendix}. The prediction stated for Bayes by Backprop in Section~\ref{subsec:bbb-limitations} therefore extends to MC
+dropout, and for the same reason: prediction intervals narrower than those of the Gaussian process and empirical coverage below the nominal level. The PICP and MPIW metrics of Chapter~\ref{ch:setup} are reported for both methods to test it.
+
+% [Miejsce na Rysunek 3.7: wpływ liczby przebiegów T na oszacowanie niepewności.
+%  Zbiór load_sin, ta sama sieć co na Rysunku 3.6. Wariant A (preferowany):
+%  średnia szerokość pasma +-2 sigma oraz RMSE w funkcji T = 2, 5, 10, 20, 50,
+%  100, 200, 500, każdy punkt uśredniony po 10 losowaniach masek, z pasmem
+%  odchylenia standardowego między losowaniami. Cel rysunku: pokazać, od którego
+%  T oszacowanie się stabilizuje, i uzasadnić liczbowo wartość T przyjętą
+%  w Rozdziale 4 — bez tego wybór T wygląda na arbitralny.
+%  Wariant B (jeśli A wyjdzie nieczytelnie): trzy panele z pasmem +-2 sigma dla
+%  T = 5, 25, 100 na tych samych osiach co Rysunek 3.6.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_7.png}
+    \caption{Stability of the Monte Carlo dropout uncertainty estimate as a
+    function of the number of stochastic forward passes $T$. The mean width of the
+    $\pm 2\sigma$ band and the root mean squared error are shown for increasing
+    $T$, each averaged over ten independent sets of dropout masks. The estimate
+    stabilises well before the largest value of $T$, which fixes the number of
+    passes used in the experiments of Chapter~\ref{ch:setup}.}
+    \label{fig:mc-dropout-passes}
+\end{figure}

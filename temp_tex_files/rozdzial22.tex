@@ -1,0 +1,238 @@
+\section{Bayesian Inference}
+\label{sec:bayesian-inference}
+
+Section~\ref{subsec:epistemic} proved that epistemic uncertainty requires a
+distribution over parameters rather than a single estimate. This section provides the
+formalism that defines such a distribution and indicates why limitations prohibit it from being computed directly. All the mathematical methods used to the compared methods are collected in this section. Chapter~3 refers to methods shown below and does not repeat the derivations.
+
+% ---------------------------------------------------------------------
+\subsection{Bayes' Rule}
+\label{subsec:bayes-rule}
+
+Let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^{N}$ denote the training set of ordered pairs from the Cartesian product of sets of labels and feautures and $\theta$ --- the model parameters. Bayes' rule connects expected results prior to observing data with expected results after observing them,
+%
+\begin{equation}
+    p(\theta \mid \mathcal{D})
+    = \frac{p(\mathcal{D} \mid \theta)\, p(\theta)}{p(\mathcal{D})},
+    \qquad
+    p(\mathcal{D}) = \int p(\mathcal{D} \mid \theta)\, p(\theta)\; \mathrm{d}\theta .
+    \label{eq:bayes-rule}
+\end{equation}
+%
+The prior distribution $p(\theta)$ encodes knowledge of the parameters before seeing the
+data. The likelihood $p(\mathcal{D} \mid \theta)$ describes how well a given set of
+parameters explains the observations. The posterior distribution $p(\theta \mid \mathcal{D})$
+is the result of inference. The denominator $p(\mathcal{D})$, called the evidence or
+marginal likelihood, serves as a normalizing constant. All subsequent computational
+difficulties arise from this single component.
+
+% ---------------------------------------------------------------------
+\subsection{Bayesian Inference vs. Point Estimation}
+\label{subsec:mle-map}
+
+Standard neural network training returns a single set of weights, that corresponds to maximum
+likelihood estimation (MLE),
+%
+\begin{equation}
+    \theta_{\mathrm{MLE}} = \arg\max_{\theta} \, \log p(\mathcal{D} \mid \theta) .
+    \label{eq:mle}
+\end{equation}
+%
+Incorporating a prior distribution leads to maximum a posteriori (MAP) estimation,
+%
+\begin{equation}
+    \theta_{\mathrm{MAP}}
+    = \arg\max_{\theta} \,
+      \bigl[\log p(\mathcal{D} \mid \theta) + \log p(\theta)\bigr] .
+    \label{eq:map}
+\end{equation}
+%
+The marginal likelihood $p(\mathcal{D})$ does not depend on $\theta$ and vanishes in both optimization problems. A Gaussian prior $p(\theta) = \mathcal{N}(0, \sigma_p^2 I)$ yields the term
+$-\lVert \theta \rVert^2 / (2\sigma_p^2)$ after taking its logarithm, which corresponds to the L2
+regularization. Training with weight decay thus implements the estimation of MAP, although it is
+usually not presented in this way~\cite{jospin2022}.
+
+Both procedures return a point, not a distribution, thus reducing the posterior value to a single value, which leads to removal of information on how many other sets of parameters explained the data equally well. This information is precisely what constitutes epistemic uncertainty. Bayesian inference consists of abandoning this simplification and preserving the entire distribution $p(\theta \mid \mathcal{D})$. However, MAP estimation remains important for selected methods: for example the Laplace approximation in Section~3.4 builds a Gaussian distribution around $\theta_{\mathrm{MAP}}$, thus treating the point as a starting point rather than a final result.
+
+% ---------------------------------------------------------------------
+\subsection{Bayesian Neural Network}
+\label{subsec:bnn-formalism}
+
+Transferring the scheme described before to a neural network requires three major changes: 
+\begin{itemize}
+    \item The randominitialization of weights is replaced by an explicit prior distribution $p(\theta)$, usually Gaussian and independent for each weight.
+    \item A single set of weights after training is replaced by a posterior distribution.
+    \item Prediction ceases to be a forward pass through the network and becomes an average over this distribution.
+\end{itemize}
+A model built this way is called a Bayesian neural network (BNN)~\cite{jospin2022}.
+
+The likelihood stems from the assumed noise model. For heteroscedastic regression from
+Equation~\eqref{eq:heteroscedastic}, it takes the form
+%
+\begin{equation}
+    p(\mathcal{D} \mid \theta)
+    = \prod_{i=1}^{N}
+      \mathcal{N}\!\left(y_i;\, \mu_\theta(x_i),\, \sigma^2_\theta(x_i)\right),
+    \label{eq:likelihood-regression}
+\end{equation}
+%
+where $\mu_\theta$ and $\sigma^2_\theta$ follow the noise model of
+Section~\ref{subsec:aleatoric}. In the experiments of this chapter and the next,
+$\sigma^2_\theta$ is a single learnt constant rather than a function of the
+input; Equation~\eqref{eq:likelihood-regression} is written in its general form
+because the Bayesian treatment that follows does not depend on that choice. Maximizing the logarithm of expression
+\eqref{eq:likelihood-regression} is equivalent to minimizing the Gaussian negative
+logarithmic likelihood of Equation~\eqref{eq:gaussian-nll}. The Bayesian formulation thus does
+not replace the noise model, but builds upon it. A network introducing distribution over
+weights also reports high uncertainty where training data was lacking, not just where it was
+noisy.
+
+% ---------------------------------------------------------------------
+\subsection{Predictive Distribution}
+\label{subsec:predictive-distribution}
+
+The quantity of interest to the model user is not the posterior, but the
+prediction at a new point $x^\ast$, which is obtained by marginalizing over the posterior
+distribution,
+%
+\begin{equation}
+    p(y^\ast \mid x^\ast, \mathcal{D})
+    = \int p(y^\ast \mid x^\ast, \theta)\,
+            p(\theta \mid \mathcal{D})\; \mathrm{d}\theta .
+    \label{eq:predictive-2}
+\end{equation}
+%
+Equation~\eqref{eq:predictive-2} is the central formula of this work. A Bayesian prediction
+is the average of the predictions of all admissible models, weighted by their plausibility in
+light of the data. Each of the five methods compared in Chapter~3 represents a different way
+of approximating this integral, and it is the only reason that these methods differ.
+
+The spread of the predictive distribution decomposes into two components introduced in
+Section~\ref{sec:types-of-uncertainty}. The law of total variance yields
+%
+\begin{equation}
+    \underbrace{\operatorname{Var}\!\left(y^\ast \mid x^\ast\right)}_{\text{total}}
+    =
+    \underbrace{\mathbb{E}_{p(\theta \mid \mathcal{D})}
+      \!\left[\sigma^2_\theta(x^\ast)\right]}_{\text{aleatoric}}
+    +
+    \underbrace{\operatorname{Var}_{p(\theta \mid \mathcal{D})}
+      \!\left(\mu_\theta(x^\ast)\right)}_{\text{epistemic}} .
+    \label{eq:total-variance-2}
+\end{equation}
+%
+The first term is the expected predicted noise variance. The second is the variance of the
+predicted mean over the posterior and vanishes when the posterior collapses to a single
+point. The estimation of a single point from Section~\ref{subsec:mle-map} therefore sets the second term to zero by assumption, rather than by observation~\cite{hullermeier2021}. Equation
+\eqref{eq:total-variance-2} serves as the operational recipe used in Chapter~4: for each
+method, both components are reported separately.
+
+% ---------------------------------------------------------------------
+\subsection{Intractability of the Posterior}
+\label{subsec:intractability}
+
+Equations~\eqref{eq:bayes-rule} and~\eqref{eq:predictive-2} are exact, but for neural
+networks, they cannot be computed directly. The source of difficulty is the integral in the
+denominator of expression \eqref{eq:bayes-rule}, arising from three independent reasons:
+
+\begin{itemize}
+    \item dimensionality --- integration takes place over a parameter space of size
+          on the order of $10^5$ and larger, where numerical quadratures are useless;
+    \item lack of conjugacy --- network non-linearities mean that the product of the
+          likelihood and the prior does not belong to any family with a known analytical
+          form;
+    \item posterior geometry --- network symmetries, such as neuron permutations within a
+          layer, replicate every solution, making the posterior highly
+          multimodal~\cite{jospin2022}.
+\end{itemize}
+
+The consequence is practical - since $p(\theta \mid \mathcal{D})$ remains unknown,
+integral~\eqref{eq:predictive-2} cannot be calculated directly, making approximation
+necessary. Chapter~3 compares methods that perform such an approximation; this section
+justifies why they are necessary in the first place.
+
+% ---------------------------------------------------------------------
+\subsection{Two Approximation Strategies}
+\label{subsec:mcmc-vs-vi}
+
+Approximate inference methods fall into two families. The first samples from the exact
+posterior without determining it explicitly. These include Markov Chain Monte Carlo
+(MCMC) methods, including Hamiltonian Monte Carlo. Their advantage is convergence to the
+true posterior given a sufficiently long chain. The second family replaces the posterior
+with a distribution of a known form from which sampling is cheap, converting inference into
+an optimization problem.
+
+MCMC methods were omitted in this work. Therefore, all methods compared in Chapter~3 belong to the second
+family.
+
+% ---------------------------------------------------------------------
+\subsection{Variational Inference *Może do usunięcia*}
+\label{subsec:variational-inference}
+
+Variational inference (VI) converts the integration problem into an optimization problem by assumpting existence of family of distributions $\mathcal{Q}$ of a known form, and the element
+closest to the true posterior is sought~\cite{blei2017} using Kullback--Leibler divergence to measure its closeness.
+%
+\begin{equation}
+    q^\ast(\theta)
+    = \arg\min_{q \in \mathcal{Q}}\;
+      \mathrm{KL}\bigl(q(\theta) \,\|\, p(\theta \mid \mathcal{D})\bigr) .
+    \label{eq:vi-objective}
+\end{equation}
+%
+Problem~\eqref{eq:vi-objective} in this form still contains the unknown posterior.
+Expanding the divergence, however, leads to the identity
+%
+\begin{equation}
+    \log p(\mathcal{D})
+    = \mathcal{L}(q) + \mathrm{KL}\bigl(q(\theta) \,\|\, p(\theta \mid \mathcal{D})\bigr),
+    \qquad 
+    \mathcal{L}(q)
+    = \mathbb{E}_{q}\bigl[\log p(\mathcal{D} \mid \theta)\bigr]
+      - \mathrm{KL}\bigl(q(\theta) \,\|\, p(\theta)\bigr) .
+    \label{eq:elbo}
+\end{equation}
+%
+The left-hand side does not depend on $q$, and the divergence is non-negative, thus, the
+quantity $\mathcal{L}(q)$ constitutes a lower bound on the evidence and is called the
+evidence lower bound (ELBO). Minimizing the divergence is equivalent to maximizing the
+ELBO, and the latter does not require knowledge of the posterior. Both terms of expression
+$\mathcal{L}(q)$ have a clear interpretation: the first rewards data fitness, while the second
+penalizes divergence from the prior distribution.
+
+In practice, the family $\mathcal{Q}$ must be narrow enough to be manageable. The
+most common choice is the mean-field approximation, in which the parameters are mutually
+independent,
+%
+\begin{equation}
+    q_\phi(\theta) = \prod_{j=1}^{M} q_{\phi_j}(\theta_j),
+    \qquad
+    q_{\phi_j}(\theta_j) = \mathcal{N}(\theta_j;\, \mu_j,\, \sigma_j^2) .
+    \label{eq:mean-field}
+\end{equation}
+%
+The expectation gradient in Equation~\eqref{eq:elbo} cannot be calculated directly
+because the distribution that being averaged over itself depends on the parameters that
+are optimized. The solution is the reparameterization: a sample is written as a
+deterministic function of the parameters and a random variable with a distribution
+independent of them,
+%
+\begin{equation}
+    \theta = \mu + \sigma \odot \varepsilon,
+    \qquad \varepsilon \sim \mathcal{N}(0, I) .
+    \label{eq:reparameterization}
+\end{equation}
+%
+In this way, randomness is transferred to $\varepsilon$, and the gradient with respect to
+$\mu$ and $\sigma$ passes through standard backpropagation. This procedure makes VI
+applicable to neural networks and forms the basis of the Bayes by Backprop algorithm in
+Section~3.2.
+
+A limitation of this strategy is fact that the solution $q^\ast$ is the best
+approximation \emph{within the assumed family}, not an approximation with controlled error.
+The direction of the divergence used in Equation~\eqref{eq:vi-objective} favors
+distributions concentrated around a single mode, causing VI to systematically underestimate
+the posterior variance~\cite{blei2017}. The mean-field approximation additionally ignores
+correlations between weights. In a work dedicated to uncertainty estimation, this has direct
+significance: an underestimated posterior spread translates to an underestimated epistemic
+term in Equation~\eqref{eq:total-variance-2}. This observation recurs in Chapter~4 during the
+interpretation of the PICP metric.

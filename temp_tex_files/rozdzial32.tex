@@ -1,0 +1,231 @@
+\section{Bayesian neural networks (Bayes by Backprop)}
+\label{sec:bayes-by-backprop}
+
+Section~\ref{subsec:variational-inference} introduced variational inference as a
+general strategy rather than as a particular algorithm. Bayes by Backprop (BBB) is
+one concrete instance of that strategy, applied to the weights of a neural
+network~\cite{blundell2015}. The contrast with Section~\ref{sec:gaussian-processes}
+is based on the assumption that the Gaussian process performs inference in the function space and obtains the predictive distribution in closed form, whereas the BBB performs inference in
+the parameter space and settles for an approximation. The following therefore describes a
+realization of the mathematical foundations of Chapter~\ref{ch:methods}, and the derivations of
+Section~\ref{subsec:variational-inference} are not repeated.
+
+Each weight of the network is replaced by a pair of variational parameters instead
+of a single number $w_j$, the model stores a mean $\mu_j$ and a scale parameter
+$\rho_j$, from which the standard deviation is obtained as   $\sigma_j = \log\!\left(1 + \exp \rho_j\right)$. The softplus transform keeps $\sigma_j$ positive without a constraint on the optimizer. The resulting variational family is exactly the mean-field Gaussian of Equation~\eqref{eq:mean-field}, with $\theta = (\mu, \rho)$ collecting all variational parameters. Under this parameterization, training a single network is replaced by training an infinite
+ensemble whose members draw their weights from one shared, learnt distribution~\cite{blundell2015}.
+
+% [Miejsce na Rysunek 3.4: waga deterministyczna kontra waga jako rozkład.
+%  Dwa panele obok siebie, ten sam mały graf sieci (2-3-1). Po lewej każda
+%  krawędź opisana jedną liczbą, po prawej — małą krzywą gaussowską o środku
+%  mu_j i szerokości sigma_j. Cel rysunku: pokazać bez wzoru, na czym polega
+%  różnica między punktowym oszacowaniem a rozkładem nad wagami.
+%  UWAGA: rysunek narysować SAMODZIELNIE. Odpowiedniki u Blundella (rys. 1)
+%  i Jospina (rys. 3) są objęte prawem autorskim i nie wolno ich przedrukować.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_4.png}
+    \caption{Weight representation in a deterministic network and in a Bayesian
+    neural network trained with Bayes by Backprop. On the left, each connection
+    carries a single value obtained by point estimation. On the right, each
+    connection carries a Gaussian distribution described by a mean $\mu_j$ and a
+    standard deviation $\sigma_j$, so the number of stored parameters doubles.}
+    \label{fig:bbb-weight-distributions}
+\end{figure}
+
+The objective function follows directly from Equation~\eqref{eq:elbo}, rewritten in
+the notation used for network weights. Maximizing the evidence lower bound is
+equivalent to minimizing the variational free energy,
+%.
+\begin{equation}
+    \mathcal{F}(\mathcal{D}, \theta)
+    = \underbrace{\mathrm{KL}\bigl(q(\mathbf{w} \mid \theta) \,\|\, p(\mathbf{w})\bigr)}_{\text{complexity cost}}
+      - \underbrace{\mathbb{E}_{q(\mathbf{w} \mid \theta)}
+        \bigl[\log p(\mathcal{D} \mid \mathbf{w})\bigr]}_{\text{likelihood cost}} ,
+    \label{eq:bbb-free-energy}
+\end{equation}
+%
+where $\mathbf{w}$ denotes a sample of all network weights~\cite{blundell2015}. The
+likelihood cost rewards are in agreement with the training data. The complexity cost
+penalizes departure from the prior and admits an interpretation as a compression
+cost in the sense of minimum description length.
+
+The second term of Equation (complexity cost) ~\eqref{eq:bbb-free-energy} deserves emphasis, because it settles a question raised in Section~\ref{subsec:mle-map}. Weight decay was shown
+there to be MAP estimation under a Gaussian prior, that is, a regularization term
+constructed on fact from a Bayesian reading. Here, the relationship is reversed - the penalty is not added to the loss by design but follows from the variational objective itself. Regularisation in a Bayesian neural network is therefore derived rather than imposed, and the strength of the penalty is fixed by the choice of prior rather than by a tuned coefficient~\cite{blundell2015}.
+
+% ---------------------------------------------------------------------
+\subsection{Training with unbiased Monte Carlo gradients}
+\label{subsec:bbb-training}
+
+The obstacle to optimizing Equation~\eqref{eq:bbb-free-energy} is not the objective, but the gradient. The weight sampling introduces stochastic nodes inside the network, and the backpropagation cannot pass through them in the usual way~\cite{jospin2022}. The expectation in the likelihood cost is taken over a distribution that itself depends on the parameters being optimised, so the gradient  cannot be moved inside the expectation without further argument. The
+reparameterisation approach of Equation~\eqref{eq:reparameterization} removes the difficulty by writing a weight sample as a deterministic function of the variational parameters and of parameter-free noise~\cite{kingma2014}. 
+For the Gaussian family adopted here, this takes the form
+%
+\begin{equation}
+    \mathbf{w} = \mu + \log\!\left(1 + \exp \rho\right) \odot \varepsilon ,
+    \qquad \varepsilon \sim \mathcal{N}(0, I) ,
+    \label{eq:bbb-reparameterisation}
+\end{equation}
+%
+where $\odot$ denotes multiplication in the element (elementwise). Randomness is limited to
+$\varepsilon$, and gradients with respect to $\mu$ and $\rho$ pass through ordinary
+backpropagation.
+
+Variational treatments of neural networks predate this construction. Blundell et
+al.\ build on the work of Graves (2011) and show that the gradients used there can
+be made unbiased, and that the method can be extended to non-Gaussian priors~\cite{blundell2015}. Both improvements evolved from a single decision: the complexity cost is not evaluated in closed form. The objective is instead estimated entirely by sampling,
+%
+\begin{equation}
+    \mathcal{F}(\mathcal{D}, \theta)
+    \approx \sum_{i=1}^{n}
+      \left[
+        \log q\bigl(\mathbf{w}^{(i)} \mid \theta\bigr)
+        - \log p\bigl(\mathbf{w}^{(i)}\bigr)
+        - \log p\bigl(\mathcal{D} \mid \mathbf{w}^{(i)}\bigr)
+      \right] ,
+    \label{eq:bbb-mc-cost}
+\end{equation}
+%
+where $\mathbf{w}^{(i)}$ is the $i$-th sample drawn from the variational posterior.
+Dispensing with the closed form frees the choice of prior. Blundell et al.\ exploit
+this freedom with a scale mixture of two zero-mean Gaussians, the first broad and
+the second sharply concentrated around zero. On a network with two hidden layers of
+1200 units, this prior reached a test error of 1.32\% on MNIST, against 2.04\% for a
+plain Gaussian prior.
+
+Equation~\eqref{eq:bbb-mc-cost} has another less obvious property - every term is
+evaluated on the same weight sample, a variance reduction technique known as common
+random numbers~\cite{blundell2015}. Where part of the objective is available in
+closed form, that part is insensitive to the particular draw, while the remainder is
+not. A qualification is in order, and it comes from the authors themselves. The
+sampled complexity cost was not found to outperform a closed-form Kullback--Leibler
+term where the latter could be computed, only to perform no worse. The argument for
+the sampling estimator rests on the range of admissible priors, not on measured
+accuracy.
+
+The resulting training loop remains close to that of a deterministic
+network~\cite{jospin2022}. Each step draws $\varepsilon$, assembles the weights
+through Equation~\eqref{eq:bbb-reparameterisation}, evaluates the objective of
+Equation~\eqref{eq:bbb-mc-cost} on a minibatch, and updates $\mu$ and $\rho$ by
+gradient descent. The gradient with respect to the sampled weights is shared between
+both updates and is precisely what ordinary backpropagation returns~\cite{blundell2015}.
+Standard optimizers such as Adam apply without modification. One further detail
+concerns minibatches: the complexity cost refers to the whole data set and must be
+distributed between them, for instance, by weighting it with coefficients
+$\pi_i \in [0,1]$ satisfying $\sum_{i=1}^{M} \pi_i = 1$,
+%
+\begin{equation}
+    \mathcal{F}_i^{\pi}(\mathcal{D}_i, \theta)
+    = \pi_i\, \mathrm{KL}\bigl(q(\mathbf{w} \mid \theta) \,\|\, p(\mathbf{w})\bigr)
+      - \mathbb{E}_{q(\mathbf{w} \mid \theta)}
+        \bigl[\log p(\mathcal{D}_i \mid \mathbf{w})\bigr] .
+    \label{eq:bbb-kl-reweighting}
+\end{equation}
+%
+A schedule that front-loads the complexity cost onto the first minibatches of each
+epoch was reported to work well~\cite{blundell2015}. It should be noted that the
+objective is estimated from a small number of samples, often a single one, so the
+gradient estimate is noisy and the convergence curve is far less smooth than in
+deterministic training~\cite{jospin2022}. Averaging the reported loss over several
+epochs gives a more readable approach of convergence.
+
+% ---------------------------------------------------------------------
+\subsection{Prediction and uncertainty decomposition}
+\label{subsec:bbb-prediction}
+
+The prediction reproduces the marginalization of Equation~\eqref{eq:predictive-2} by
+Monte Carlo integration. A test input is passed through the network $T$ times, and
+each pass draws an independent weight sample $\mathbf{w}^{(t)}$ from the variational
+posterior. 
+Each pass yields a predictive mean $\mu_{\mathbf{w}^{(t)}}(x^\ast)$ and a
+predictive variance $\sigma^2_{\mathbf{w}^{(t)}}$, which under the homoscedastic
+noise model adopted here does not depend on the input. The prediction reported for $x^\ast$ is the
+average across passes~\cite{jospin2022},
+%
+\begin{equation}
+    \hat{\mu}(x^\ast)
+    = \frac{1}{T} \sum_{t=1}^{T} \mu_{\mathbf{w}^{(t)}}(x^\ast) .
+    \label{eq:bbb-predictive-mean}
+\end{equation}
+
+The spread across passes is not a by-product of this averaging but the quantity of
+primary interest. Both components of Equation~\eqref{eq:total-variance-2} are
+estimated from the same $T$ samples,
+%
+\begin{equation}
+    \operatorname{Var}\!\left(y^\ast \mid x^\ast\right)
+    \approx
+    \underbrace{\frac{1}{T} \sum_{t=1}^{T}
+      \sigma^2_{\mathbf{w}^{(t)}}(x^\ast)}_{\text{aleatoric}}
+    +
+    \underbrace{\frac{1}{T-1} \sum_{t=1}^{T}
+      \bigl(\mu_{\mathbf{w}^{(t)}}(x^\ast) - \hat{\mu}(x^\ast)\bigr)^2}_{\text{epistemic}} .
+    \label{eq:bbb-variance-estimator}
+\end{equation}
+%
+The first term averages the noise predicted by the individual networks, while the second
+measures how far those networks disagree about the mean, and it vanishes when the
+variational posterior collapses to a point. Where the training data are dense, the
+sampled networks converges and the epistemic term is small, but if there is absent data, the
+weight distributions are constrained only by the prior, the sampled networks diverge, and the epistemic term grows.
+
+% [Miejsce na Rysunek 3.5: posterior BBB na zbiorze load_sin.
+%  Trening na [0, 6], ewaluacja na [-2, 10]. TE SAME osie i ta sama skala co
+%  Rysunek 3.2 (posterior GP), żeby oba dały się porównać wzrokiem.
+%  Predykcyjna średnia z Równania (bbb-predictive-mean), pasmo +-2 sigma
+%  z pierwiastka Równania (bbb-variance-estimator), punkty treningowe,
+%  prawdziwa funkcja linią przerywaną. Opcjonalnie: 10-15 pojedynczych
+%  przebiegów cienką linią, żeby widać było rozrzut, z którego liczony jest
+%  człon epistemiczny. Cel rysunku: czy pasmo rozchodzi się poza zakresem
+%  treningowym słabiej niż u GP.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_5.png}
+    \caption{Predictive distribution of a Bayesian neural network trained with Bayes
+    by Backprop on the synthetic sine dataset. The model is trained on the interval
+    $[0, 6]$ and evaluated on $[-2, 10]$, with the axes matching those of
+    Figure~\ref{fig:gp-posterior-sine} to allow a direct comparison. The band shows
+    $\pm 2\sigma$ obtained from Equation~\eqref{eq:bbb-variance-estimator} over
+    $T$ stochastic forward passes.}
+    \label{fig:bbb-posterior-sine}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{Computational cost and limitations}
+\label{subsec:bbb-limitations}
+ 
+The cost of the method is incurred twice. Training stores two variational parameters
+per weight, so the parameter count doubles relative to a deterministic network of the
+same architecture~\cite{arbel2023}. Each training iteration was reported to run about
+twice as slowly as an iteration with dropout~\cite{blundell2015}. Inference is
+affected more severely because a single forward pass no longer suffices and the
+$T$ passes of Equation~\eqref{eq:bbb-variance-estimator} must be performed for every
+test point. The need for Monte Carlo integration at evaluation time is a persistent
+drawback of Bayesian neural networks and not a property of this algorithm
+alone~\cite{jospin2022}.
+
+The mean-field assumption is the most consequential limitation. Learning a complete
+covariance matrix on the weights would require $\mathcal{O}(n^2)$ variational
+parameters, which is unattainable for the parameter counts reported in
+Section~\ref{subsec:intractability}; the diagonal approximation reduces this to
+$\mathcal{O}(n)$~\cite{jospin2022}. The independence between weights is therefore a
+concession to tractability rather than a modeling belief. Its cost is stated
+plainly in the literature: the restriction is likely to result in an underestimate
+of the overall posterior uncertainty~\cite{arbel2023}. Variational methods are also
+prone to mode collapse, that is, to concentrating on a single mode of a posterior
+known to be highly multimodal. Both effects act in the same direction and narrow the
+approximate posterior.
+
+A qualification is again due, and again it comes from the original work. Blundell et
+al.\ acknowledge the known tendency of variational methods to underestimate
+uncertainty, yet report that they did not observe its practical consequences in
+their experiments~\cite{blundell2015}. The claim is therefore a prediction rather
+than a settled result. Equation~\eqref{eq:total-variance-2} identifies where such an
+underestimate would appear: the epistemic term of Equation~\eqref{eq:bbb-variance-estimator} is the only component affected by the shape of the approximate posterior. This gives a testable expectation for Chapter~\ref{ch:results}. If the mean-field posterior is too narrow, Bayes by
+Backprop should produce narrower prediction intervals than the Gaussian process of
+Section~\ref{sec:gaussian-processes}, and its empirical coverage should fall short of
+the nominal level. The metrics defined in Chapter~\ref{ch:setup} are reported for
+both methods precisely to settle this question.

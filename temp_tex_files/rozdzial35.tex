@@ -1,0 +1,308 @@
+\section{Deep ensembles}
+\label{sec:deep-ensembles}
+
+The three preceding sections approximated a posterior over the weights in three
+different ways: a Gaussian variational family, a Bernoulli one, and a local
+Gaussian read off the curvature at a single maximum. Deep ensembles dispense
+with the posterior altogether. A fixed number $M$ of networks of the same
+architecture is trained independently, and their predictive distributions are
+combined. Lakshminarayanan et al.\ proposed the method explicitly as an
+alternative to Bayesian neural networks, on the grounds that the latter demand
+substantial changes to the training pipeline and are slower to train than
+standard networks~\cite{lakshminarayanan2017}. Nothing in the construction
+refers to a prior, a posterior or a divergence. The method therefore enters this
+comparison from the opposite direction to
+Sections~\ref{sec:bayes-by-backprop}--\ref{sec:laplace-approximation}, and it
+closes the chapter from the non-Bayesian side.
+
+The motivation the authors give comes directly from
+Section~\ref{sec:mc-dropout}. Dropout admits a second reading, as a combination
+of an ensemble of networks with shared parameters, alongside the variational one
+established by Gal and Ghahramani. Lakshminarayanan et al.\ argue that the
+ensemble reading is the more plausible of the two whenever the dropout rate is
+not tuned on the training data, because any sensible approximation to a
+posterior must depend on that data~\cite{lakshminarayanan2017}. This is the
+objection already recorded in Section~\ref{subsec:mc-dropout-limitations},
+where the rate $p_i$ was seen to be chosen rather than inferred. Taken
+seriously, it suggests examining ensembles on their own terms rather than as a
+by-product of a variational argument.
+
+% ---------------------------------------------------------------------
+\subsection{Construction and training}
+\label{subsec:ensembles-training}
+
+The recipe consists of three elements: a proper scoring rule as the training
+criterion, an ensemble, and adversarial training as an optional
+addition~\cite{lakshminarayanan2017}.
+
+A scoring rule assigns a numerical value to a predictive distribution and
+rewards better calibrated predictions over worse ones. It is proper when the
+true distribution attains the optimum, and only then. The log-likelihood is a
+proper scoring rule, whereas the squared error of a point prediction says
+nothing about predictive uncertainty. For regression, each member therefore
+carries the two output heads of Section~\ref{subsec:aleatoric} and is trained by
+minimising the Gaussian negative log-likelihood of
+Equation~\eqref{eq:gaussian-nll}, under the heteroscedastic model of
+Equation~\eqref{eq:heteroscedastic}. The variance head is passed through a
+softplus transform to enforce positivity, and a small floor is added for
+numerical stability~\cite{lakshminarayanan2017}.
+
+This is a design decision rather than a formality, and the authors measured its
+effect. A single network that learns its variance achieved a better test
+log-likelihood than an ensemble of five, or of ten, networks trained on the
+squared error and equipped with the empirical variance of their predictions. The
+calibration figures make the gap concrete: on the \emph{Year Prediction MSD}
+dataset, the nominal $80\%$ interval derived from that empirical variance
+contained roughly $20\%$ of the test observations~\cite{lakshminarayanan2017}.
+The common heuristic of ensembling point predictors and reading the spread as an
+uncertainty estimate is thus not a cheap version of the method described here.
+It is a different and markedly worse one.
+
+Diversity between members is the second element, and it is obtained at no cost.
+Random initialisation of the parameters, together with random shuffling of the
+training points, was found sufficient in practice. Every member is trained on
+the whole training set rather than on a bootstrap sample, because bagging
+degraded performance in the reported experiments; a bootstrap sample contains on
+average only $63.2\%$ unique points, and a base learner with many local optima
+does not need the extra randomisation~\cite{lakshminarayanan2017}. The same
+protocol is adopted in this work, which also keeps the training data identical
+to that used by the other four methods.
+
+Why so little randomisation suffices was examined later by Fort et
+al.~\cite{fort2019}. Independently initialised networks reach entirely different
+modes of the loss landscape. Functions collected along a single optimisation
+trajectory, or sampled from a subspace around it, cluster within one mode in the
+space of predictions, even when they differ considerably in weight space.
+Low-loss paths connecting distinct modes do exist, but the functions along them
+are not connected in prediction space. Measured on the diversity--accuracy
+plane, the decorrelating power of random initialisation is not matched by
+subspace sampling methods~\cite{fort2019}.
+
+This is the mechanism behind the epistemic estimates of the method, and it
+locates the contrast with the two preceding sections precisely. Bayes by
+Backprop is unimodal because the divergence of
+Equation~\eqref{eq:vi-objective} is mode-seeking and the family of
+Equation~\eqref{eq:mean-field} ignores correlations, as set out in
+Section~\ref{subsec:bbb-limitations}. The Laplace approximation is unimodal
+because the expansion is taken at one maximum, as set out in
+Section~\ref{subsec:laplace-limitations}. Fort et al.\ propose exactly this
+difference as the explanation for the gap between theory and practice: scalable
+variational methods concentrate on a single mode, while deep ensembles cover
+several, and Bayesian neural networks underperform ensembles in practice
+particularly under dataset shift~\cite{fort2019}.
+
+The third element is adversarial training. Given an input $x$ with target $y$
+and a loss $\ell(\theta, x, y)$, the fast gradient sign method produces a
+perturbed example
+%
+\begin{equation}
+    x' = x + \epsilon \operatorname{sign}
+      \bigl( \nabla_{x}\, \ell(\theta, x, y) \bigr) ,
+    \label{eq:fgsm}
+\end{equation}
+%
+which is added to the training set with the original target. The perturbation
+follows the direction in which the loss rises fastest, so the procedure is read
+as a cheap way of smoothing the predictive distribution over a neighbourhood of
+each training point, rather than along a randomly chosen
+direction~\cite{lakshminarayanan2017}. The step is marked optional in the
+original algorithm, and the reported evidence is mixed. On MNIST it improved
+every metric at every ensemble size, on SVHN the benefit faded as $M$ grew, and
+on the regression benchmarks the difference between an ensemble with and without
+it lay within the error bars~\cite{lakshminarayanan2017}.
+
+Adversarial training was excluded from this work, for two reasons. The reported
+gain on regression is not distinguishable from noise, and the perturbation size
+$\epsilon$ is an additional hyperparameter that would have to be set per
+dataset. Tuning it for one method alone would make the comparison depend on the
+effort spent on that method, which is the argument already used for the kernel
+choice in Section~\ref{subsec:gp-kernel}. A second consideration is that
+Equation~\eqref{eq:fgsm} alters the training set, so the ensemble would no
+longer be trained on the same data as the other four methods.
+
+% ---------------------------------------------------------------------
+\subsection{Prediction and uncertainty decomposition}
+\label{subsec:ensembles-prediction}
+
+The trained members are treated as a uniformly weighted mixture,
+%
+\begin{equation}
+    p\bigl(y^\ast \mid x^\ast\bigr)
+    = \frac{1}{M} \sum_{m=1}^{M}
+      p_{\theta_m}\bigl(y^\ast \mid x^\ast\bigr) ,
+    \label{eq:ensemble-mixture}
+\end{equation}
+%
+where $\theta_m$ denotes the parameters of the $m$-th network. For Gaussian
+members this is a mixture of Gaussians. To keep quantiles and predictive
+probabilities easy to compute, the mixture is approximated by a single Gaussian
+carrying its mean and its variance~\cite{lakshminarayanan2017}.
+
+Both moments are already available. The mean is the average of the member means,
+that is Equation~\eqref{eq:bbb-predictive-mean} with the index over stochastic
+passes replaced by an index over members. The variance is
+Equation~\eqref{eq:bbb-variance-estimator} under the same substitution, and it
+is identical in form to Equation~\eqref{eq:mc-dropout-heteroscedastic}. The
+estimator is therefore the third appearance of one expression, and it is not
+restated here. What differs between the three methods is the origin of the
+samples, and nothing else. In Section~\ref{sec:bayes-by-backprop} they are drawn
+from a learnt variational posterior, in Section~\ref{sec:mc-dropout} from a set
+of Bernoulli masks, and here each sample is the endpoint of an independent
+optimisation run. The samples of a deep ensemble are not drawn from any
+distribution at all.
+
+% Uwaga dla autora: lakshminarayanan2017 zapisuje wariancję mieszaniny
+% w postaci (1/M) sum (sigma_m^2 + mu_m^2) - mu_*^2, czyli z dzielnikiem M,
+% tak samo jak kendall2017 w Sekcji 3.3. Powyżej przyjęto dzielnik T-1
+% z Równania (bbb-variance-estimator). To ta sama decyzja, o której mowa
+% w notatce w rozdzial33.tex — zadeklarować ją raz w Rozdziale 4
+% i stosować dla wszystkich metod.
+
+The reading of the two terms carries over unchanged from
+Equation~\eqref{eq:total-variance-2}. The first averages the noise predicted by
+the individual networks and is the aleatoric component. The second measures how
+far the members disagree about the mean and is the epistemic component. It
+vanishes for $M = 1$, which restates the observation of
+Section~\ref{subsec:mle-map} that a single point estimate reports no epistemic
+uncertainty by assumption. Where the training data are dense, independently
+trained networks agree and the term is small. Outside the training range the
+members are constrained by nothing in common, they diverge, and the term grows.
+The toy experiment of the original work shows precisely this: ensembling
+improved the predictive distribution most as the test points moved away from the
+observed data~\cite{lakshminarayanan2017}.
+
+% [Miejsce na Rysunek 3.10: posterior deep ensemble na zbiorze load_sin.
+%  Trening na [0, 6], ewaluacja na [-2, 10]. TE SAME osie i ta sama skala co
+%  Rysunek 3.2 (GP), 3.5 (BBB), 3.6 (MC dropout) i 3.8 (Laplace) — komplet
+%  pięciu rysunków na wspólnej skali domyka główny argument wizualny
+%  rozdziału.
+%  Sieć: M niezależnych MLP z src/models.py (dropout = 0), różne ziarna
+%  inicjalizacji i różna kolejność danych, trening Gaussian NLL.
+%  Predykcyjna średnia z Równania (bbb-predictive-mean) po składowych,
+%  pasmo +-2 sigma z Równania (bbb-variance-estimator), punkty treningowe,
+%  prawdziwa funkcja linią przerywaną. OBOWIĄZKOWO: M pojedynczych średnich
+%  cienką linią — to jedyne miejsce w pracy, gdzie widać wprost rozbieżność
+%  składowych poza zakresem treningowym, czyli mechanizm z fort2019.
+%  Cel rysunku: pokazać, że pasmo rozchodzi się poza [0, 6] szerzej niż
+%  u BBB i MC dropout, i porównać tempo tego wzrostu z GP.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_10.png}
+    \caption{Predictive distribution of a deep ensemble on the synthetic sine
+    dataset. The models are trained on the interval $[0, 6]$ and evaluated on
+    $[-2, 10]$, with the axes matching those of
+    Figures~\ref{fig:gp-posterior-sine}, \ref{fig:bbb-posterior-sine},
+    \ref{fig:mc-dropout-posterior-sine} and~\ref{fig:laplace-posterior-sine} to
+    allow a direct comparison. Thin lines show the predictive means of the
+    individual members, which coincide within the training range and separate
+    outside it. The band shows $\pm 2\sigma$ obtained from the mixture of
+    Equation~\eqref{eq:ensemble-mixture}.}
+    \label{fig:ensemble-posterior-sine}
+\end{figure}
+
+% [Miejsce na Rysunek 3.11: wpływ liczby składowych M na oszacowanie
+%  niepewności. Zbiór load_sin, ta sama architektura co na Rysunku 3.10.
+%  Średnia szerokość pasma +-2 sigma oraz RMSE w funkcji M = 1, 2, 3, 5, 10,
+%  15, 20, każdy punkt uśredniony po kilku losowaniach zestawu ziaren,
+%  z pasmem odchylenia standardowego między losowaniami. Rysunek jest
+%  odpowiednikiem Rysunku 3.7 dla MC dropout i ma tę samą rolę: uzasadnić
+%  liczbowo wartość M przyjętą w Rozdziale 4, zamiast przyjmować ją
+%  arbitralnie. Punkt odniesienia z literatury: M = 5 jako wartość domyślna
+%  u lakshminarayanan2017 i malejące przyrosty powyżej pięciu składowych
+%  u ovadia2019.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_11.png}
+    \caption{Quality of the deep ensemble uncertainty estimate as a function of
+    the number of members $M$. The mean width of the $\pm 2\sigma$ band and the
+    root mean squared error are shown for increasing $M$, each averaged over
+    several independent sets of initialisation seeds. The gains diminish well
+    before the largest value of $M$, which fixes the ensemble size used in the
+    experiments of Chapter~\ref{ch:setup}.}
+    \label{fig:ensemble-size}
+\end{figure}
+
+% [Miejsce na Rysunek 3.12 (opcjonalny): wariancja uczona kontra wariancja
+%  empiryczna. Dwa panele na wspólnych osiach, oba na zbiorze load_sin:
+%  po lewej M sieci trenowanych na MSE, z pasmem +-2 sigma liczonym wyłącznie
+%  z empirycznego rozrzutu predykcji; po prawej ten sam ensemble trenowany
+%  na Gaussian NLL, z pasmem z Równania (bbb-variance-estimator).
+%  Cel rysunku: odtworzyć na własnych danych wynik lakshminarayanan2017
+%  uzasadniający dwugłowicową architekturę — heurystyka „uśrednij predykcje
+%  punktowe i weź rozrzut" wyraźnie zaniża niepewność. Jeśli argument
+%  liczbowy w tekście wystarczy, rysunek można pominąć.]
+
+% ---------------------------------------------------------------------
+\paragraph{Computational cost and limitations.}
+The cost of the method is the highest in this comparison, and it is also the
+easiest to describe. Training is repeated $M$ times and prediction requires $M$
+forward passes, so both scale linearly with the ensemble size. The saving
+argument advanced in Section~\ref{subsec:mc-dropout-limitations} applies here
+without the qualification attached to it there: the members are trained
+independently and share nothing, so the whole procedure parallelises trivially
+and the wall-clock cost need not grow at all~\cite{lakshminarayanan2017}. Memory
+is the component that does not parallelise away. The ensemble holds $M$ complete
+copies of the network, which is the only entry in the cost table of Ovadia et
+al.\ whose storage grows with the number of replications; Monte Carlo dropout
+adds nothing and mean-field variational inference doubles the
+count~\cite{ovadia2019}. Where memory is the binding constraint, the ensemble
+can be distilled into a single smaller model~\cite{lakshminarayanan2017}.
+
+Two limitations follow from the construction. The diversity on which the
+epistemic term depends is an empirical property of random initialisation, not a
+guaranteed one; Fort et al.\ measured it rather than derived
+it~\cite{fort2019}. Nothing in the procedure encodes beliefs held before the
+data are seen, so the method offers no counterpart to the kernel of
+Section~\ref{subsec:gp-kernel} or the prior precision of
+Section~\ref{sec:laplace-approximation} through which such beliefs could be
+stated or tuned. A third qualification is specific to the present work. The
+strongest evidence for deep ensembles under distribution shift comes from
+classification benchmarks~\cite{ovadia2019, wilson2020}, whereas the comparison
+in Chapter~\ref{ch:results} is a regression one, so those conclusions are
+carried over as an expectation rather than as an established result.
+
+That evidence is nevertheless consistent. Ovadia et al.\ benchmarked the
+methods of this chapter across image, text and categorical data under
+increasing corruption of the inputs. Their summary is that the quality of
+uncertainty degrades with shift for every method, that calibration on
+independent and identically distributed test data does not carry over to
+shifted data, and that deep ensembles perform best across most metrics while
+proving the most robust to shift~\cite{ovadia2019}. The advantage was shown not
+to be a matter of capacity, since widening the single-network baselines did not
+reproduce it, and a modest ensemble of five members already captured most of the
+available gain~\cite{ovadia2019}.
+
+A closing observation returns the method to the framework of
+Chapter~\ref{ch:methods}. Wilson and Izmailov argue that the distinguishing
+property of a Bayesian approach is marginalisation rather than optimisation, and
+that deep ensembles are not a competitor to Bayesian inference but a mechanism
+for performing it~\cite{wilson2020}. Because a network is typically
+underspecified by the data, many different parameter settings explain it
+equally well, which is exactly the situation in which averaging over them
+matters. By representing several basins of attraction, an ensemble can
+approximate the integral of Equation~\eqref{eq:predictive-2} more faithfully
+than a method that represents one basin accurately. Their experiment supports
+the claim directly. Against a reference predictive distribution built from long
+Hamiltonian Monte Carlo chains, the deep ensemble was closer to the reference
+than factorised variational inference, which was strongly overconfident between
+clusters of data points; the distance to the reference fell with the number of
+ensemble members, while for the variational method it barely moved with the
+number of samples~\cite{wilson2020}.
+
+This is the note on which the chapter closes.
+Section~\ref{subsec:predictive-distribution} stated that the five methods differ
+only in how they approximate Equation~\eqref{eq:predictive-2}. The last of them
+was introduced as an alternative to Bayesian inference and can be read as a
+particularly effective instance of it, which suggests that the label attached to
+a method orders it less usefully than the quality of the approximation it
+delivers. Chapter~\ref{ch:results} is arranged to test that ordering
+empirically, and the expectation attached to deep ensembles differs from those
+recorded for the earlier methods. Prediction intervals should be wider than
+those of Bayes by Backprop and Monte Carlo dropout, empirical coverage should
+sit closer to the nominal level than for either, and the growth of the epistemic
+term under extrapolation should be the strongest among the four neural methods,
+with the Gaussian process of Section~\ref{sec:gaussian-processes} as the
+reference. The PICP and MPIW metrics of Chapter~\ref{ch:setup}, together with
+Figure~\ref{fig:ensemble-posterior-sine}, are reported to settle it.

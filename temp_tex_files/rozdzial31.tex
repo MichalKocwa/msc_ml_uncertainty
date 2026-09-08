@@ -1,0 +1,221 @@
+\section{Gaussian processes}
+\label{sec:gaussian-processes}
+
+Section~\ref{subsec:intractability} showed that the posterior over the weights of a neural
+network cannot be obtained in closed form. Gaussian processes circumvent this obstacle by
+changing the object of inference - instead of a distribution over a finite set of parameters,
+a distribution is placed directly over functions. For a Gaussian likelihood, both the
+posterior and the predictive distribution of Equation~\eqref{eq:predictive-2} then admit exact
+analytical solutions. Therefore, in this work, a Gaussian process (GP) serves as a reference
+point, being the only one of the five compared methods whose uncertainty estimates do not involve an approximation of the posterior~\cite{rasmussen2006}.
+
+% ---------------------------------------------------------------------
+\subsection{A distribution over functions}
+\label{subsec:gp-definition}
+
+A Gaussian process is a collection of random variables, any finite number of which have a
+joint Gaussian distribution~\cite{rasmussen2006}. 
+\begin{equation}
+    f(x) \sim \mathcal{GP}\bigl(m(x),\, k(x, x')\bigr),
+\end{equation}
+It is fully specified by a mean function
+$m(x)$,
+%
+\begin{equation}
+    m(x) = \mathbb{E}\left[f(x)\right],
+    \label{eq:gp-definition}
+\end{equation}
+%
+and a covariance function $k(x, x')$.
+\begin{equation}
+    k(x, x') = \mathbb{E}\bigl[(f(x) - m(x))(f(x') - m(x'))\bigr] .
+    \label{eq:gp-covariance}
+\end{equation}
+%
+The definition refers to an infinite-dimensional object, but it is used only through its
+finite-dimensional marginals. For any finite set of inputs $X = \{x_1, \dots, x_N\}$, the
+vector of function values follows a multivariate normal distribution,
+%
+\begin{equation}
+    \mathbf{f} = \bigl[f(x_1), \dots, f(x_N)\bigr]^{\!\top}
+    \sim \mathcal{N}\!\left(\mathbf{m},\, K\right),
+    \qquad
+    K_{ij} = k(x_i, x_j) .
+    \label{eq:gp-marginal}
+\end{equation}
+%
+This property is what makes computation possible because inference is carried out only at the points that actually occur in the training set and in the test set, and the remainder of the function is never represented explicitly.
+
+The mean function is set to zero in the experiments in this work. The assumption is not
+restrictive, because the targets are centered before training, thus all prior knowledge about the
+shape of the function is carried by the covariance function alone.
+
+% ---------------------------------------------------------------------
+\subsection{Covariance functions}
+\label{subsec:gp-kernel}
+
+The covariance function, also called the kernel, determines which functions are plausible
+before any data is seen. It states how strongly the values at two inputs are coupled to each other, and consequently how smooth and how variable the sampled functions are. 
+
+The squared exponential kernel, also known as the radial basis function (RBF) kernel, is the most common choice known in literature,
+%
+\begin{equation}
+    k_{\mathrm{RBF}}(x, x')
+    = \sigma_f^2 \exp\!\left(
+        -\frac{\lVert x - x' \rVert^2}{2\ell^2}
+      \right) .
+    \label{eq:rbf-kernel}
+\end{equation}
+%
+Behavior of this kernel is controlled by two hyperparameters - the signal variance $\sigma_f^2$ sets the vertical amplitude of the sampled functions, while the length-scale $\ell$ sets the distance over whichfunction values remain correlated: a small $\ell$ produces rapidly varying functions, whereas a large $\ell$ produces nearly flat ones. Because the correlation decays with distance, the prior is recovered far away from the training inputs. This decay is the mechanism by which a GP increases its epistemic uncertainty under extrapolation, and it is examined experimentally in Chapter~5.
+
+Observation noise is included by adding a white-noise term to the kernel,
+%
+\begin{equation}
+    k_y(x, x') = k_{\mathrm{RBF}}(x, x') + \sigma_n^2\, \delta_{xx'},
+    \label{eq:noisy-kernel}
+\end{equation}
+%
+where $\delta_{xx'}$ equals one for identical set of inputs and zero otherwise. The choice of kernel is a strong modelling assumption rather than a technical detail. Samples from an RBF prior are infinitely differentiable, which makes the kernel a poor description of rough functions; the
+Mat\'ern class relaxes this requirement at the cost of an additional hyperparameter~\cite{rasmussen2006}. The RBF kernel with a single shared length-scale was
+adopted here due to the fact it is the standard baseline in the literature on uncertainty estimation, and tuning a separate kernel per dataset would make the comparison between methods
+dependent on the effort spent on the reference model.
+
+% [Miejsce na Rysunek 3.1: wpływ length-scale na prior.
+%  Trzy panele obok siebie, w każdym 5 próbek funkcji z GP prior na przedziale
+%  [-2, 10] dla ell = 0.3, 1.0, 3.0 (sigma_f = 1). Cel rysunku: pokazać, że
+%  kernel koduje założenia o gładkości, zanim pojawią się jakiekolwiek dane.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]{rodzial3_rys/img3_1.png}
+    \caption{Samples drawn from a Gaussian process prior with an RBF kernel for three values
+    of the length-scale $\ell$ (signal variance fixed at $\sigma_f^2 = 1$). Short length-scales
+    admit rapidly varying functions, while long ones admit only slowly varying ones. The kernel
+    encodes assumptions about smoothness before any data are observed.}
+    \label{fig:gp-prior-samples}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{Posterior and predictive distribution}
+\label{subsec:gp-posterior}
+
+Let $\mathbf{y}$ denote the vector of observed targets and $x^\ast$ a test input. Under the
+generative model of Equation~\eqref{eq:generative-model} with Gaussian noise, the observed
+targets and the function value at the test point are jointly Gaussian,
+%
+\begin{equation}
+    \begin{bmatrix} \mathbf{y} \\ f(x^\ast) \end{bmatrix}
+    \sim
+    \mathcal{N}\!\left(
+      \mathbf{0},
+      \begin{bmatrix}
+        K + \sigma_n^2 I & \mathbf{k}_\ast \\
+        \mathbf{k}_\ast^{\!\top} & k(x^\ast, x^\ast)
+      \end{bmatrix}
+    \right),
+    \qquad
+    \left[\mathbf{k}_\ast\right]_i = k(x_i, x^\ast) .
+    \label{eq:gp-joint}
+\end{equation}
+%
+Conditioning the joint distribution on the observations yields the predictive distribution in
+closed form,
+%
+\begin{equation}
+    \mu_\ast
+    = \mathbf{k}_\ast^{\!\top}
+      \left(K + \sigma_n^2 I\right)^{-1} \mathbf{y},
+    \label{eq:gp-posterior-mean}
+\end{equation}
+%
+\begin{equation}
+    \sigma_\ast^2
+    = k(x^\ast, x^\ast)
+      - \mathbf{k}_\ast^{\!\top}
+        \left(K + \sigma_n^2 I\right)^{-1} \mathbf{k}_\ast .
+    \label{eq:gp-posterior-var}
+\end{equation}
+%
+Equations~\eqref{eq:gp-posterior-mean} and~\eqref{eq:gp-posterior-var} are the exact
+counterpart of the intractable integral~\eqref{eq:predictive-2}.  The predictive mean is a linear combination of the observed targets, weighted by the similarity between the test point and each training point. The predictive variance, does not depend on $\mathbf{y}$ at all. A GP therefore derives its epistemic uncertainty from the geometry of the training inputs, before any target value is taken into account. The second term of Equation~\eqref{eq:gp-posterior-var} is the reduction in prior variance contributed by the data, and it fades away where no data are available.
+
+The predictive variance of a noisy observation is
+%
+\begin{equation}
+    \operatorname{Var}\!\left(y^\ast \mid x^\ast\right)
+    = \underbrace{\sigma_\ast^2}_{\text{epistemic}}
+      + \underbrace{\sigma_n^2}_{\text{aleatoric}} ,
+    \label{eq:gp-variance-split}
+\end{equation}
+%
+so both components are read directly from the model rather than estimated by sampling. 
+The white-noise term of Equation~\eqref{eq:noisy-kernel} is constant across the input space, which
+makes the model homoscedastic, in agreement with the noise model adopted by every other method
+compared in this work.
+
+% [Miejsce na Rysunek 3.2: posterior GP na zbiorze load_sin.
+%  Trening na [0, 6], ewaluacja na [-2, 10]. Predykcyjna średnia, pasmo +-2 sigma,
+%  punkty treningowe, prawdziwa funkcja linią przerywaną. Cel rysunku: wąskie pasmo
+%  w zakresie treningowym, rozejście się poza nim, powrót do prior mean = 0.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_2.png}
+    \caption{Gaussian process posterior on the synthetic sine dataset. The model is trained on
+    the interval $[0, 6]$ and evaluated on $[-2, 10]$. The $\pm 2\sigma_\ast$ band is narrow
+    where training points are dense and widens rapidly outside the training range, where the
+    predictive mean reverts towards the prior mean.}
+    \label{fig:gp-posterior-sine}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{Hyperparameter selection}
+\label{subsec:gp-hyperparameters}
+
+The hyperparameters $\vartheta = (\sigma_f, \ell, \sigma_n)$ are not known in advance but
+estimated from the data. The criterion is the log marginal likelihood,
+%
+\begin{equation}
+    \log p(\mathbf{y} \mid X, \vartheta)
+    = -\tfrac{1}{2}\, \mathbf{y}^{\!\top} K_y^{-1} \mathbf{y}
+      - \tfrac{1}{2}\, \log \lvert K_y \rvert
+      - \tfrac{N}{2} \log 2\pi ,
+    \qquad
+    K_y = K + \sigma_n^2 I .
+    \label{eq:gp-marginal-likelihood}
+\end{equation}
+%
+The first term rewards the fit to the data, while the second penalises model complexity through the
+determinant of the covariance matrix, and the third one is a constant. The quantity being
+maximised is the evidence $p(\mathcal{D})$ from Equation~\eqref{eq:bayes-rule}, which was
+identified in Section~\ref{subsec:intractability} as the source of every computational
+difficulty. For a GP it is available analytically, and the trade-off between fit and
+complexity is therefore resolved by the model itself, without a validation set.
+
+The objective in Equation~\eqref{eq:gp-marginal-likelihood} is not convex and may possess
+several local optima. The optimiser is consequently restarted from several random
+initialisations, and the solution with the highest marginal likelihood is retained. It should
+be noted that this procedure returns point estimates of the hyperparameters, an approach known
+as type~II maximum likelihood. A fully Bayesian treatment would also marginalize over $\vartheta$. The GP used here is thus exact given the kernel, and one small component of uncertainty,
+namely uncertainty about the kernel itself, remains outside the reported  intervals~\cite{rasmussen2006}.
+
+% ---------------------------------------------------------------------
+\subsection{Computational cost and practical limitations}
+\label{subsec:gp-limitations}
+
+Both the predictive equations and the marginal likelihood require the inversion of an
+$N \times N$ matrix, usually performed through a Cholesky decomposition. The cost is
+$\mathcal{O}(N^3)$ in time and $\mathcal{O}(N^2)$ in space, and it is incurred anew at every
+step of hyperparameter optimisation. Exact GP regression is therefore restricted to datasets of
+moderate size. For this reason, the benchmark training sets in this work were subsampled to a
+fixed size, so that every method is trained on identical data and the comparison is not
+confounded by the scaling limits of a single model. Sparse approximations based on inducing
+points reduce the cost substantially~\cite{quinonero2005}, but they were excluded, because they
+would replace the exact posterior with an approximate one.
+
+Two further limitations should be noted: stationary kernels such as the RBF depend on the
+distance between inputs and distances become uninformative as the input dimension grows, which
+weakens the method on high-dimensional problems. In addition, the reversion of the predictive
+mean to the prior mean far from the data is desirable for uncertainty estimation, but it
+provides no extrapolation of the trend itself.

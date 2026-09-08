@@ -1,0 +1,258 @@
+\section{Laplace approximation}
+\label{sec:laplace-approximation}
+
+Section~\ref{subsec:mle-map} left the MAP estimate as an unfinished result: a
+single point that discards every trace of how many other parameter settings
+explained the data equally well; however, the Laplace approximation recovers part of that
+information without discarding the point. It fits a Gaussian centered on
+$\theta_{\mathrm{MAP}}$, with a covariance matrix taken from the local curvature
+of the loss, and thereby turns a trained point-estimate network into a Bayesian
+one~\cite{daxberger2021}. The method was introduced to neural networks by
+MacKay~\cite{mackay1992}, and the two scalable treatments used below build directly on that work~\cite{ritter2018, daxberger2021}.
+
+The facts mentioned before make the method apart from the two preceding sections; Bayes by Backprop
+replaced every weight with a pair of variational parameters and optimized a new
+objective. Monte Carlo dropout demanded dropout before every weight layer together with $L_2$ regularization, and Section~\ref{subsec:mc-dropout-limitations} noted how often implementations depart from that requirement. 
+
+On the other hand, the Laplace approximation imposes no condition on training at all. It requires no modification of the training procedure, so the uncertainty of a model already in
+production can be estimated without retraining it~\cite{ritter2018}, and it can be applied to a pre-trained network obtained off the shelf~\cite{daxberger2021}. It is the only post-hoc method in this comparison, and the predictive performance of the underlying point estimate is left untouched.
+
+Let $\mathcal{L}(\mathcal{D}; \theta)$ denote the regularised training loss, that
+is, the negative logarithm of the joint distribution appearing in the numerator of Equation~\eqref{eq:bayes-rule}. Its exponential is an unnormalised posterior, and $\theta_{\mathrm{MAP}}$ is a local minimum of it. Expanding $\mathcal{L}$ to second order around that minimum gives
+%
+\begin{equation}
+    \mathcal{L}(\mathcal{D}; \theta)
+    \approx \mathcal{L}(\mathcal{D}; \theta_{\mathrm{MAP}})
+      + \tfrac{1}{2}\,
+        (\theta - \theta_{\mathrm{MAP}})^{\!\top}
+        \bigl[
+          \nabla^2_\theta \mathcal{L}(\mathcal{D}; \theta)
+          \bigr|_{\theta_{\mathrm{MAP}}}
+        \bigr]
+        (\theta - \theta_{\mathrm{MAP}}) ,
+    \label{eq:laplace-taylor}
+\end{equation}
+%
+where the first-order term is absent because the gradient vanishes at a maximum of the posterior~\cite{ritter2018}. The right-hand side of Equation~\eqref{eq:laplace-taylor} is quadratic in $\theta$, so its exponential has Gaussian functional form and the approximate posterior follows immediately,
+%
+\begin{equation}
+    p(\theta \mid \mathcal{D})
+    \approx \mathcal{N}\!\left(\theta;\, \theta_{\mathrm{MAP}},\, \Sigma\right),
+    \qquad
+    \Sigma :=
+    \left(
+      \nabla^2_\theta \mathcal{L}(\mathcal{D}; \theta)
+      \bigr|_{\theta_{\mathrm{MAP}}}
+    \right)^{\!-1} .
+    \label{eq:laplace-posterior}
+\end{equation}
+%
+The mean is acquired from the training and the covariance from the inverse Hessian of the loss~\cite{jospin2022}. Equation~\eqref{eq:laplace-posterior} is the whole
+method; everything that follows concerns making it computable.
+
+% ---------------------------------------------------------------------
+
+The Hessian inherits the structure of the loss, under the Gaussian prior
+$p(\theta) = \mathcal{N}(\theta;\, 0,\, \gamma^2 I)$ that corresponds to weight
+decay, it splits into a prior and a likelihood contribution,
+%
+\begin{equation}
+    \nabla^2_\theta \mathcal{L}(\mathcal{D}; \theta)
+    \bigr|_{\theta_{\mathrm{MAP}}}
+    = \gamma^{-2} I
+      - \sum_{n=1}^{N}
+        \nabla^2_\theta \log p\bigl(y_n \mid f_\theta(x_n)\bigr)
+        \bigr|_{\theta_{\mathrm{MAP}}} ,
+    \label{eq:laplace-hessian}
+\end{equation}
+%
+in which the first term is diagonal and constant, and the second carries all the
+information~\cite{daxberger2021}. In this equation (especially in the second therm) two obstacles arise, and they are of different kinds. The second term of Equation~\eqref{eq:laplace-hessian} grows quadratically with the number of parameters, which Section~\ref{subsec:intractability} put at $10^5$ and above, so a naive implementation is infeasible. The exact Hessian of a network is also not guaranteed to be positive semi-definite, whereas Equation~\eqref{eq:laplace-posterior} defines a distribution only if the curvature matrix is. Both obstacles are met by replacing the Hessian with a positive semi-definite surrogate: the Fisher information matrix or the generalised Gauss--Newton matrix, which coincide for the log-likelihoods in common use and have become the default choice in deep Laplace approximations~\cite{daxberger2021}.
+
+A surrogate of the same size is still too large, so a factorization is imposed on
+top of it. The lightest option keeps only the diagonal, which reduces the inversion from cubic to linear cost in the number of parameters. The approximate Kronecker-factored curvature (KFAC) sits between the diagonal and the full matrix: it models the correlations between weights within a layer and assumes independence between layers, writing each within-layer block as a
+Kronecker product of two smaller matrices~\cite{daxberger2021}. Applied to the
+Laplace approximation, this produces a normal posterior matrix on top of the weight
+matrix of every layer, from which sampling is cheap because only the two factors
+need to be inverted~\cite{ritter2018}. The choice between these structures is
+not a matter of budget alone, a diagonal covariance assigns substantial
+probability mass to low-probability regions of the true posterior whenever
+weights are strongly correlated~\cite{ritter2018}; MacKay had already warned
+against diagonal factorisation~\cite{mackay1992}. The empirical picture
+agrees: the Kronecker-factored variant produced higher uncertainty on
+out-of-distribution inputs and greater robustness to adversarial attacks than
+its diagonal counterpart, which behaved much like dropout~\cite{ritter2018},
+and diagonal approximations performed markedly worse than KFAC in a broader
+benchmark~\cite{daxberger2021}.
+
+A second route to scalability restricts inference to part of the network: subnetwork inference treats a small subset of the parameters probabilistically and leaves the rest at their MAP values; the last layer variant, which fixes the first $L-1$ layers as a feature extractor, is the special case recommended as a default because it is cheap and, for the last layer, the Hessian coincides with the generalized Gauss--Newton matrix~\cite{daxberger2021}. Neither restriction is adopted here, the networks compared in this work contain a few thousand parameters, so the full curvature matrix remains affordable, and the covariance structure can be treated as an experimental variable rather than as a concession to cost. This also keeps the comparison honest because the remaining methods place a distribution over all weights.
+
+The prior precision deserves separate treatment, since it is where the post-hoc character of the method becomes a practical freedom. Separation of training from inference means that the prior variance $\gamma^2$ entering Equation~\eqref{eq:laplace-hessian} does not need to be equal to the weight decay used during training~\cite{daxberger2021}. Ritter et al.\ exploit this by treating the prior precision and scale of the curvature factors as hyperparameters tuned in a validation set, which requires no retraining and is trivial to parallelise~\cite{ritter2018}. A principled alternative dispenses with the validation set and maximizes the Laplace approximation to the evidence, in the tradition of the MacKay framework~\cite{mackay1992}, in which the evidence also provides an objective choice of the weight decay term~\cite{daxberger2021}. The quantity being maximized is the same one that Section~\ref{subsec:gp-hyperparameters} obtained analytically for a Gaussian process in Equation~\eqref{eq:gp-marginal-likelihood}. For a network, it is itself
+an approximation, which is a fair summary of the difference between the two methods.
+
+% ---------------------------------------------------------------------
+\subsection{Prediction and uncertainty decomposition}
+\label{subsec:laplace-prediction}
+
+A Gaussian posterior over the weights does not induce a Gaussian distribution over the outputs, because the network is non-linear. Two ways of evaluating Equation~\eqref{eq:predictive-2} follow from this, the first draws $T$ weight samples from Equation~\eqref{eq:laplace-posterior} and averages the resulting predictions~\cite{ritter2018}, which reproduces the estimator already used in Equation~\eqref{eq:bbb-variance-estimator}. The second linearises the network about the MAP estimate, $f_\theta(x^\ast) \approx f_{\theta_{\mathrm{MAP}}}(x^\ast) + J(x^\ast)^{\!\top}(\theta - \theta_{\mathrm{MAP}})$, with $J(x^\ast)$ the Jacobian of the output with respect to the parameters. The distribution over outputs is then Gaussian and available in closed form~\cite{daxberger2021}.
+
+The choice between them is settled in the literature. Monte Carlo integration
+performs poorly for Laplace approximations built on Gauss--Newton or Fisher
+curvature, an inconsistency between the curvature approximation and the
+predictive that the linearised predictive removes~\cite{daxberger2021}. For
+regression with a Gaussian likelihood of variance $\sigma^2$, the predictive
+distribution is obtained exactly by convolving the two Gaussians,
+%
+\begin{equation}
+    p(y^\ast \mid x^\ast, \mathcal{D})
+    \approx
+    \mathcal{N}\!\left(
+      y^\ast;\;
+      f_{\theta_{\mathrm{MAP}}}(x^\ast),\;
+      \underbrace{J(x^\ast)^{\!\top} \Sigma\, J(x^\ast)}_{\text{epistemic}}
+      + \underbrace{\sigma^2}_{\text{aleatoric}}
+    \right) .
+    \label{eq:laplace-predictive}
+\end{equation}
+%
+Equation~\eqref{eq:laplace-predictive} is the counterpart of Equation~\eqref{eq:total-variance-2} for this method, and its structure matches the Gaussian process decomposition of Equation~\eqref{eq:gp-variance-split} rather than the sampling estimators of Sections~\ref{sec:bayes-by-backprop} and~\ref{sec:mc-dropout}. The epistemic term is a quadratic form in the posterior covariance, projected onto the output through the Jacobian. It grows where the loss is flat, that is, where the data constrain the parameters weakly.
+
+% Uwaga: człon sigma^2 w Równaniu (laplace-predictive) jest w
+% daxberger2021 stałą wariancją gaussowskiej wiarygodności — czyli model
+% homoskedastyczny, dokładnie jak tau^{-1} w Równaniu (mc-dropout-variance).
+% Człon sigma^2 w Równaniu (laplace-predictive) jest w daxberger2021 stałą wariancją gaussowskiej %wiarygodności — model homoskedastyczny, dokładnie jak tau^{-1} w Równaniu (mc-dropout-variance). %Akapit poniżej opisuje tę własność i wskazuje warunek, przy którym człon przestaje być stały; nie %deklaruje konfiguracji eksperymentu — ta jest w Rozdziale 4.
+
+The constant $\sigma^2$ makes Equation~\eqref{eq:laplace-predictive}
+homoscedastic, exactly as the term $\tau^{-1}$ did in
+Equation~\eqref{eq:mc-dropout-variance}. The restriction is not intrinsic to
+the method. If the MAP model carries the variance head of
+Section~\ref{subsec:aleatoric}, the likelihood variance becomes a function of
+the input and $\sigma^2$ is replaced by
+$\hat{\sigma}^2_{\theta_{\mathrm{MAP}}}(x^\ast)$, in the same way as in
+Section~\ref{sec:mc-dropout}. Unlike there, the substitution also affects the
+curvature: the Gauss--Newton matrix of Equation~\eqref{eq:laplace-hessian} is
+then taken with respect to a network whose output is two-dimensional, and the
+treatment of the variance head under the approximation has to be specified.
+Both variants are consistent with Equation~\eqref{eq:laplace-predictive}; the
+one used here is stated in Chapter~\ref{ch:setup}.
+
+One consequence of Equation~\eqref{eq:laplace-predictive} is easy to overlook, the predictive is obtained without sampling, so a calibrated prediction costs a single forward pass, which distinguishes the method from almost all other Bayesian and ensemble approaches~\cite{daxberger2021}. The stochastic passes $T$ required by Equations~\eqref{eq:bbb-variance-estimator} and~\eqref{eq:mc-dropout-heteroscedastic} disappear entirely. The savings is not unconditional: the linearized predictive method requires a Jacobian for every test input, and that cost is the reason the technique fell out of favor for largearchitectures~\cite{daxberger2021}, on the other hand on the small networks used here the Jacobian is inexpensive, so the closed form is adopted throughout.
+
+% [Miejsce na Rysunek 3.8: posterior Laplace na zbiorze load_sin.
+%  Trening na [0, 6], ewaluacja na [-2, 10]. TE SAME osie i ta sama skala co
+%  Rysunek 3.2 (GP), 3.5 (BBB) i 3.6 (MC dropout) — komplet czterech rysunków
+%  na wspólnej skali jest głównym argumentem wizualnym rozdziału.
+%  Sieć: MLP z src/models.py wytrenowana zwyczajnie (dropout = 0), następnie
+%  Laplace policzony post hoc. Predykcyjna średnia = wyjście sieci MAP,
+%  pasmo +-2 sigma z pierwiastka Równania (laplace-predictive), punkty
+%  treningowe, prawdziwa funkcja linią przerywaną.
+%  Cel rysunku: pokazać, że średnia jest DOKŁADNIE taka jak sieci
+%  deterministycznej — czego nie ma u BBB ani MC dropout — a poza zakresem
+%  treningowym pasmo rozszerza się wolniej niż u GP.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{rodzial3_rys/img3_8.png}
+    \caption{Predictive distribution of a Laplace approximation fitted post hoc
+    to a deterministically trained network on the synthetic sine dataset. The
+    model is trained on the interval $[0, 6]$ and evaluated on $[-2, 10]$, with
+    the axes matching those of Figures~\ref{fig:gp-posterior-sine},
+    \ref{fig:bbb-posterior-sine} and~\ref{fig:mc-dropout-posterior-sine} to allow
+    a direct comparison. The band shows $\pm 2\sigma$ obtained from
+    Equation~\eqref{eq:laplace-predictive}. The predictive mean is that of the
+    underlying point-estimate network and is therefore unchanged by the
+    approximation.}
+    \label{fig:laplace-posterior-sine}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\subsection{Computational cost and limitations}
+\label{subsec:laplace-limitations}
+
+The cost of the method is the smallest in this comparison. Training is
+not affected by any additional mechanics, since the point estimate is obtained in the usual way, and the only additional step is to pass the data to accumulate the curvature factors,
+performed once~\cite{ritter2018}. Measured against a MAP network, deep ensembles, variational Bayes and stochastic-gradient MCMC were between two an five times more expensive in training and prediction, whereas the Laplace approximation added negligible overhead~\cite{daxberger2021}. The memory figures tell the same story: for a wide residual network on CIFAR-10, the MAP model occupied 11~MB, the Laplace approximation 12~MB, mean-field variational Bayes 22~MB and a five-member deep ensemble 55~MB~\cite{daxberger2021}. These figures describe the recommended last-layer variant with a sampling-free predictive, so they are a lower bound rather than a general result, but the ordering is not in   doubt.
+
+The decisive limitation is stated in the construction itself - the expansion of
+Equation~\eqref{eq:laplace-taylor} is taken at one maximum, so the approximation
+is local and covers a single mode of the posterior~\cite{daxberger2021}. This
+matters because Section~\ref{subsec:intractability} identified the posterior of a
+network as highly multimodal, with every solution replicated by the permutation
+symmetries of the layers. A comparison with Bayes by Backprop sharpens the point -
+both methods return a unimodal posterior, but for unrelated reasons. In Bayes by
+Backprop the narrowness follows from the objective: the direction of the
+divergence in Equation~\eqref{eq:vi-objective} favours mode-seeking solutions and
+the mean-field family of Equation~\eqref{eq:mean-field} ignores correlations, so
+a different family or a different divergence would in principle change the
+outcome. In the Laplace approximation no such choice is available, the remaining
+modes never enter the computation, and no covariance structure, however
+expressive, can recover them. Only a mixture built from several MAP solutions
+can, and both the Laplace approximation and related Gaussian approximations
+admit such an extension post hoc~\cite{daxberger2021} — which anticipates the
+method of Section~\ref{sec:deep-ensembles}.
+
+A qualification is due, and it comes from the same source. Prior work and the
+experiments of Daxberger et al.\ indicate that restriction to a single mode is
+less limiting in practice than the argument above suggests, a behavior
+attributed to the non-linear relation between parameter space and function
+space~\cite{daxberger2021}. Their results support this - on in-distribution data
+the Laplace approximation was the best-calibrated method in terms of expected
+calibration error while retaining the accuracy of the MAP network, and it
+detected out-of-distribution inputs more reliably than variational Bayes,
+stochastic-gradient MCMC and SWAG~\cite{daxberger2021}. The locality of the
+approximation is therefore a structural property, not a measured deficiency.
+
+A second limitation is specific to the setting of this work: the quality of the
+approximation depends on the ratio between the number of data points and the
+number of curvature directions to be estimated, on a regression problem with
+twenty observations and a $78 \times 78$ precision matrix, the unregularised full
+Laplace approximation vastly overestimated the uncertainty and distorted the
+predictive mean, because the Hessian of the log-likelihood was
+underdetermined~\cite{ritter2018}. The synthetic dataset of
+Section~\ref{subsec:aleatoric} places fifty training points against several
+thousand parameters, so it falls squarely in that regime. Restricting the
+structure of the covariance is consequently not only a computational device but
+also a means of obtaining a better-conditioned estimate~\cite{ritter2018}, and
+the prior precision must be tuned rather than inherited from training.
+
+This yields an expectation for Chapter~\ref{ch:results} that differs from the one
+attached to the two preceding methods. The prediction stated in
+Section~\ref{subsec:bbb-limitations} and extended in
+Section~\ref{subsec:mc-dropout-limitations} was based on the mode-seeking behavior
+of a divergence that the Laplace approximation never minimizes, so it does not
+carry over. The reported evidence points the other way: without regularisation
+the intervals are too wide, and once the hyperparameters are tuned the
+uncertainty is slightly higher than that of a Hamiltonian Monte Carlo reference
+close to the training data and grows more slowly away from
+it~\cite{ritter2018}. Two consequences follow for the metrics of
+Chapter~\ref{ch:setup}: Empirical coverage may exceed the nominal level rather
+than fall short of it, at the price of a larger mean interval width, and the
+increase in width under extrapolation should be weaker than that of the Gaussian
+process of Section~\ref{sec:gaussian-processes}. Both are read directly from
+PICP, MPIW and Figure~\ref{fig:laplace-posterior-sine}.
+
+% [Miejsce na Rysunek 3.9: wpływ struktury kowariancji na oszacowanie
+%  niepewności. Zbiór load_sin, ta sama sieć MAP co na Rysunku 3.8, trzy
+%  panele obok siebie na wspólnych osiach: kowariancja pełna, KFAC,
+%  diagonalna. W każdym panelu pasmo +-2 sigma z Równania
+%  (laplace-predictive), punkty treningowe, prawdziwa funkcja przerywaną.
+%  Cel rysunku: pokazać na własnych danych to, co ritter2018 pokazuje na
+%  swoim zbiorze zabawkowym — że wybór faktoryzacji zmienia szerokość
+%  pasma, a wariant pełny bez regularyzacji przeszacowuje niepewność.
+%  To jest jedyne miejsce w pracy, gdzie widać, że struktura kowariancji
+%  jest decyzją modelową, a nie techniczną.
+%  Wariant rozszerzony (jeśli starczy miejsca): druga linia paneli z tą samą
+%  strukturą przy trzech wartościach prior precision, żeby uzasadnić liczbowo
+%  wartość przyjętą w Rozdziale 4.]
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]{rodzial3_rys/img3_9.png}
+    \caption{Effect of the covariance structure on the Laplace uncertainty
+    estimate, evaluated on the synthetic sine dataset with a fixed MAP network.
+    The three panels show the $\pm 2\sigma$ band obtained from a full, a
+    Kronecker-factored and a diagonal approximation of the curvature, on common
+    axes. The choice of factorisation is a modelling decision that changes the
+    reported uncertainty, and not merely a computational shortcut.}
+    \label{fig:laplace-covariance-structure}
+\end{figure}

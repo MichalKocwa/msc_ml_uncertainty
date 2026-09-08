@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*.ipynb
+
+# Data (large files — track with DVC or manually whitelist small samples)
+data/raw/
+data/processed/
+# UCI data fetched by scripts/fetch_data.py — not vendored.
+data/uci_splits/
+*.csv
+!results/*.csv
+!results/**/*.csv
+*.parquet
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# Model checkpoints
+models/checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Experiment tracking
+mlruns/
+wandb/
+lightning_logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+.env
+
+# Claude working notes
+.claude_notes.md
+
+# Model cache (src/methods/cache.py) — regenerable, never a result.
+cache/
+
+!results/.gitkeep
+!figures/.gitkeep
+
+# Legacy-probe notebooks are the deliverable, not scratch - the blanket
+# *.ipynb rule above would otherwise drop them from the repo entirely.
+!legacy_probe/*.ipynb
+
+# Notebooks are deliverables in this repo, not scratch.
+!notebooks/*.ipynb
+
+# Markdown notes stay out of the repo (author's decision). The one exception is
+# legacy_probe/README.md: it is the only record that legacy_methods.py is a
+# hand-decompilation of stale bytecode rather than the original module, and the
+# folder is misleading without it.
+*.md
+!legacy_probe/README.md
