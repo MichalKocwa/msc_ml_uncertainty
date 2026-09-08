@@ -80,3 +80,6 @@ cache/
 # folder is misleading without it.
 *.md
 !legacy_probe/README.md
+
+# MC dropout probe results - regenerable only by rerunning the probe
+!mc_dropout_experiments/results/*.csv
