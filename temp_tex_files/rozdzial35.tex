@@ -68,15 +68,14 @@ does not need the extra randomisation~\cite{lakshminarayanan2017}. The same
 protocol is adopted in this work, which also keeps the training data identical
 to that used by the other four methods.
 
-Why so little randomisation suffices was examined later by Fort et
-al.~\cite{fort2019}. Independently initialised networks reach entirely different
-modes of the loss landscape. Functions collected along a single optimisation
-trajectory, or sampled from a subspace around it, cluster within one mode in the
-space of predictions, even when they differ considerably in weight space.
-Low-loss paths connecting distinct modes do exist, but the functions along them
-are not connected in prediction space. Measured on the diversity--accuracy
-plane, the decorrelating power of random initialisation is not matched by
-subspace sampling methods~\cite{fort2019}.
+Why so little randomisation suffices is not answered by the original work, which
+reports the finding as an empirical one. A structural explanation was offered
+later: a deep ensemble selects for functional diversity by representing several
+basins of attraction of the loss surface, whereas most methods in Bayesian deep
+learning approximate the posterior faithfully within a single basin. What
+matters for the quality of the combined predictive distribution is that
+diversity between the members, rather than the accuracy of any one of
+them~\cite{wilson2020}.
 
 This is the mechanism behind the epistemic estimates of the method, and it
 locates the contrast with the two preceding sections precisely. Bayes by
@@ -85,11 +84,10 @@ Equation~\eqref{eq:vi-objective} is mode-seeking and the family of
 Equation~\eqref{eq:mean-field} ignores correlations, as set out in
 Section~\ref{subsec:bbb-limitations}. The Laplace approximation is unimodal
 because the expansion is taken at one maximum, as set out in
-Section~\ref{subsec:laplace-limitations}. Fort et al.\ propose exactly this
-difference as the explanation for the gap between theory and practice: scalable
-variational methods concentrate on a single mode, while deep ensembles cover
-several, and Bayesian neural networks underperform ensembles in practice
-particularly under dataset shift~\cite{fort2019}.
+Section~\ref{subsec:laplace-limitations}. The consequence of this division is
+that a single-basin approximation would have to marginalise over several basins
+before it could match a deep ensemble as an approximation to the Bayesian
+predictive distribution~\cite{wilson2020}.
 
 The third element is adversarial training. Given an input $x$ with target $y$
 and a loss $\ell(\theta, x, y)$, the fast gradient sign method produces a
@@ -182,8 +180,8 @@ observed data~\cite{lakshminarayanan2017}.
 %  pasmo +-2 sigma z Równania (bbb-variance-estimator), punkty treningowe,
 %  prawdziwa funkcja linią przerywaną. OBOWIĄZKOWO: M pojedynczych średnich
 %  cienką linią — to jedyne miejsce w pracy, gdzie widać wprost rozbieżność
-%  składowych poza zakresem treningowym, czyli mechanizm z fort2019.
-%  Cel rysunku: pokazać, że pasmo rozchodzi się poza [0, 6] szerzej niż
+%  składowych poza zakresem treningowym, czyli mechanizm wielu basins
+%  of attraction opisany za wilson2020 w podrozdziale 3.5.1.%  Cel rysunku: pokazać, że pasmo rozchodzi się poza [0, 6] szerzej niż
 %  u BBB i MC dropout, i porównać tempo tego wzrostu z GP.]
 
 \begin{figure}[htbp]
@@ -251,9 +249,11 @@ count~\cite{ovadia2019}. Where memory is the binding constraint, the ensemble
 can be distilled into a single smaller model~\cite{lakshminarayanan2017}.
 
 Two limitations follow from the construction. The diversity on which the
-epistemic term depends is an empirical property of random initialisation, not a
-guaranteed one; Fort et al.\ measured it rather than derived
-it~\cite{fort2019}. Nothing in the procedure encodes beliefs held before the
+epistemic term depends is an empirical property of the training procedure rather
+than a guaranteed one. Nothing forces two independently initialised networks
+apart, and the sufficiency of random initialisation is reported as an
+observation from experiments rather than derived~\cite{lakshminarayanan2017}.
+Nothing in the procedure encodes beliefs held before the
 data are seen, so the method offers no counterpart to the kernel of
 Section~\ref{subsec:gp-kernel} or the prior precision of
 Section~\ref{sec:laplace-approximation} through which such beliefs could be
@@ -281,9 +281,10 @@ that deep ensembles are not a competitor to Bayesian inference but a mechanism
 for performing it~\cite{wilson2020}. Because a network is typically
 underspecified by the data, many different parameter settings explain it
 equally well, which is exactly the situation in which averaging over them
-matters. By representing several basins of attraction, an ensemble can
-approximate the integral of Equation~\eqref{eq:predictive-2} more faithfully
-than a method that represents one basin accurately. Their experiment supports
+matters. The basin argument of Section~\ref{subsec:ensembles-training} then
+reads as a statement about Equation~\eqref{eq:predictive-2}, since an ensemble
+covering several basins approximates that integral more faithfully than a method
+representing one basin accurately~\cite{wilson2020}. Their experiment supports
 the claim directly. Against a reference predictive distribution built from long
 Hamiltonian Monte Carlo chains, the deep ensemble was closer to the reference
 than factorised variational inference, which was strongly overconfident between

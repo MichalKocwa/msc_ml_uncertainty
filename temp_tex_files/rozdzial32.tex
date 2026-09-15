@@ -93,7 +93,7 @@ Dispensing with the closed form frees the choice of prior. Blundell et al.\ expl
 this freedom with a scale mixture of two zero-mean Gaussians, the first broad and
 the second sharply concentrated around zero. On a network with two hidden layers of
 1200 units, this prior reached a test error of 1.32\% on MNIST, against 2.04\% for a
-plain Gaussian prior.
+plain Gaussian prior~\cite{blundell2015}.
 
 Equation~\eqref{eq:bbb-mc-cost} has another less obvious property - every term is
 evaluated on the same weight sample, a variance reduction technique known as common
@@ -210,8 +210,11 @@ alone~\cite{jospin2022}.
 The mean-field assumption is the most consequential limitation. Learning a complete
 covariance matrix on the weights would require $\mathcal{O}(n^2)$ variational
 parameters, which is unattainable for the parameter counts reported in
-Section~\ref{subsec:intractability}; the diagonal approximation reduces this to
-$\mathcal{O}(n)$~\cite{jospin2022}. The independence between weights is therefore a
+Section~\ref{subsec:intractability}; structured approximations, of which the
+diagonal one adopted here is the simplest, reduce this to
+$\mathcal{O}(n)$~\cite{jospin2022}.
+
+The independence between weights is therefore a
 concession to tractability rather than a modeling belief. Its cost is stated
 plainly in the literature: the restriction is likely to result in an underestimate
 of the overall posterior uncertainty~\cite{arbel2023}. Variational methods are also

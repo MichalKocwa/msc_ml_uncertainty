@@ -22,6 +22,7 @@ the gap between our two bands, not to either one of them. A side-by-side visual
 comparison with that paper's figures is therefore not like-for-like, and the
 thesis has to say so.
 """
+from pathlib import Path
 from typing import Dict, Sequence
 
 import matplotlib
@@ -96,6 +97,8 @@ def plot_predictive_panel(
     y_true: np.ndarray,
     train_range,
     show_legend: bool = False,
+    samples: np.ndarray = None,
+    n_sample_lines: int = 0,
 ) -> None:
     """Draw one method's predictive distribution on `ax`.
 
@@ -103,6 +106,17 @@ def plot_predictive_panel(
     `predict()` call per method per seed (DEC-007) — the same array the metrics
     are sliced from, which is what keeps the band in this figure and the
     `mpiw95` in the table describing the same numbers.
+
+    `samples` (`(T, n)`, original y units) with `n_sample_lines > 0` draws up
+    to that many individual per-run means as thin lines — the ensemble
+    members, or a subset of the MC dropout / BBB passes. The thesis's Figure
+    3.10 caption promises exactly this for the ensemble ("thin lines show the
+    predictive means of the individual members"), and it is the one place
+    where the disagreement the epistemic term is computed from is visible
+    directly rather than through the band. The first `n_sample_lines` rows
+    are drawn, not a random subset, so the figure is a deterministic function
+    of the prediction. Methods without samples (`gp`, `laplace`, `map`) draw
+    nothing extra.
     """
     x = np.asarray(x_test).ravel()
     sd_total = np.sqrt(var_aleatoric + var_epistemic)
@@ -122,6 +136,12 @@ def plot_predictive_panel(
                     color=colour, alpha=0.42, lw=0, zorder=2,
                     label=rf"$\pm{k:g}\sigma$ aleatoric")
 
+    if samples is not None and n_sample_lines > 0:
+        drawn = np.asarray(samples)[:n_sample_lines]
+        for i, line in enumerate(drawn):
+            ax.plot(x, line, color=colour, lw=0.6, alpha=0.7, zorder=3,
+                    label="individual runs ({})".format(len(drawn)) if i == 0 else None)
+
     ax.plot(x, y_true, color=_TRUTH_COLOUR, ls="--", lw=1.1, zorder=3, label=r"$\sin(x)$")
     ax.plot(x, mean, color=colour, lw=1.5, zorder=4, label="predictive mean")
     ax.scatter(np.asarray(x_train).ravel(), y_train, s=4, color=_TRAIN_POINT_COLOUR,
@@ -130,6 +150,94 @@ def plot_predictive_panel(
     ax.set_title(METHOD_LABELS[method])
     if show_legend:
         ax.legend(loc="upper left", ncol=2)
+
+
+def make_method_figures(
+    panels: Dict[str, dict],
+    x_test: np.ndarray,
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    y_true: np.ndarray,
+    train_range,
+    out_dir,
+    prefix: str,
+    suptitle: str = "",
+    layout: str = "both",
+    n_sample_lines: int = 0,
+    ylim=None,
+    methods: Sequence[str] = None,
+) -> list:
+    """Per-method figures and/or one combined grid, from prediction arrays.
+
+    `panels[method]` holds `mean`, `var_aleatoric`, `var_epistemic` and
+    optionally `samples`, all in original y units. `layout` is `"separate"`
+    (one PNG per method), `"all"` (one 2x3 grid) or `"both"`. Shared axis
+    limits across every panel, computed from every band with nothing clipped
+    (`shared_limits`), unless `ylim` is given explicitly — an explicit limit is
+    a recorded decision about the y-range, not a silent cap.
+
+    Written as library code rather than inside an experiment script so that a
+    figure can be redrawn from SAVED predictions (a different layout, with or
+    without individual-run lines) without re-running any fit. Returns the
+    paths written.
+    """
+    apply_style()
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    x = np.asarray(x_test).ravel()
+    names = [n for n in (methods or METHOD_ORDER) if n in panels]
+
+    bands = [np.asarray(y_train), np.asarray(y_true)]
+    for n in names:
+        p = panels[n]
+        sd = np.sqrt(p["var_aleatoric"] + p["var_epistemic"])
+        bands += [p["mean"] - FIGURE_SD_MULTIPLIER * sd, p["mean"] + FIGURE_SD_MULTIPLIER * sd]
+    xlim, auto_ylim = shared_limits(x, bands)
+    ylim = tuple(ylim) if ylim is not None else auto_ylim
+
+    def draw(ax, name, show_legend):
+        p = panels[name]
+        plot_predictive_panel(
+            ax, name, x, p["mean"], p["var_aleatoric"], p["var_epistemic"],
+            x_train, y_train, y_true, train_range, show_legend=show_legend,
+            samples=p.get("samples"), n_sample_lines=n_sample_lines,
+        )
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+
+    written = []
+    if layout in ("separate", "both"):
+        for name in names:
+            fig, ax = plt.subplots(figsize=(5.2, 3.6))
+            draw(ax, name, show_legend=True)
+            ax.set_xlabel("$x$")
+            ax.set_ylabel("$y$")
+            path = out_dir / "{}_{}.png".format(prefix, name)
+            fig.savefig(path)
+            plt.close(fig)
+            written.append(path)
+
+    if layout in ("all", "both"):
+        n_cols = 3 if len(names) > 2 else len(names)
+        n_rows = int(np.ceil(len(names) / n_cols))
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.5 * n_cols, 3.5 * n_rows),
+                                 sharex=True, sharey=True, squeeze=False)
+        flat = axes.ravel()
+        for ax, name in zip(flat, names):
+            draw(ax, name, show_legend=(name == names[0]))
+        for ax in flat[len(names):]:
+            ax.set_visible(False)
+        for ax in axes[-1]:
+            ax.set_xlabel("$x$")
+        for ax in axes[:, 0]:
+            ax.set_ylabel("$y$")
+        if suptitle:
+            fig.suptitle(suptitle)
+        path = out_dir / "{}_all.png".format(prefix)
+        fig.savefig(path)
+        plt.close(fig)
+        written.append(path)
+    return written
 
 
 def shared_limits(x_test: np.ndarray, bands: Sequence[np.ndarray], pad: float = 0.05):

@@ -15,6 +15,7 @@ import ast
 from pathlib import Path
 from typing import Sequence
 
+import numpy as np
 import pandas as pd
 
 from src.methods import METHODS
@@ -105,3 +106,50 @@ def append_rows(df: pd.DataFrame, path: Path) -> None:
                     path, missing or "none", extra or "none")
             )
     df.to_csv(path, mode="a", header=not path.exists(), index=False)
+
+
+def save_predictions(path: Path, arrays: dict, panels: dict, meta: dict = None) -> None:
+    """Write one seed's full predictive arrays to a compressed `.npz`.
+
+    `arrays` holds the data (`x_test`, `y_test`, `x_train`, `y_train`, ...) and
+    `panels[method]` the un-standardised `mean`, `var_aleatoric`,
+    `var_epistemic` and, where the method has them, `samples`. `meta` values
+    are stored as 0-d arrays (strings and numbers both round-trip).
+
+    Exists so that a figure is a function of a SAVED prediction, not of a
+    re-run: any layout (one panel per method, a combined grid, with or without
+    individual-run lines) can be redrawn later from the same numbers the
+    metrics were computed from (DEC-007), without touching a model or the
+    cache. Keys are `<method>__<field>`; the method list is stored under
+    `methods` so a reader does not have to parse key names.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out = {k: np.asarray(v) for k, v in arrays.items()}
+    out["methods"] = np.array(list(panels))
+    for method, p in panels.items():
+        for field, value in p.items():
+            if value is not None:
+                out["{}__{}".format(method, field)] = np.asarray(value)
+    for k, v in (meta or {}).items():
+        out["meta__{}".format(k)] = np.asarray(v)
+    np.savez_compressed(path, **out)
+
+
+def load_predictions(path: Path):
+    """Inverse of `save_predictions`: `(arrays, panels, meta)`."""
+    with np.load(Path(path), allow_pickle=False) as f:
+        methods = [str(m) for m in f["methods"]]
+        arrays, panels, meta = {}, {m: {} for m in methods}, {}
+        for key in f.files:
+            if key == "methods":
+                continue
+            if key.startswith("meta__"):
+                value = f[key]
+                meta[key[len("meta__"):]] = value.item() if value.ndim == 0 else value
+            elif "__" in key:
+                method, field = key.split("__", 1)
+                panels[method][field] = f[key]
+            else:
+                arrays[key] = f[key]
+    return arrays, panels, meta

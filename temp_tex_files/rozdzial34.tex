@@ -7,8 +7,8 @@ explained the data equally well; however, the Laplace approximation recovers par
 information without discarding the point. It fits a Gaussian centered on
 $\theta_{\mathrm{MAP}}$, with a covariance matrix taken from the local curvature
 of the loss, and thereby turns a trained point-estimate network into a Bayesian
-one~\cite{daxberger2021}. The method was introduced to neural networks by
-MacKay~\cite{mackay1992}, and the two scalable treatments used below build directly on that work~\cite{ritter2018, daxberger2021}.
+one~\cite{daxberger2021}. The approximation itself is classical, and the two
+scalable treatments used below adapt it to modern architectures~\cite{ritter2018, daxberger2021}.
 
 The facts mentioned before make the method apart from the two preceding sections; Bayes by Backprop
 replaced every weight with a pair of variational parameters and optimized a new
@@ -77,8 +77,7 @@ matrix of every layer, from which sampling is cheap because only the two factors
 need to be inverted~\cite{ritter2018}. The choice between these structures is
 not a matter of budget alone, a diagonal covariance assigns substantial
 probability mass to low-probability regions of the true posterior whenever
-weights are strongly correlated~\cite{ritter2018}; MacKay had already warned
-against diagonal factorisation~\cite{mackay1992}. The empirical picture
+weights are strongly correlated~\cite{ritter2018}. The empirical picture
 agrees: the Kronecker-factored variant produced higher uncertainty on
 out-of-distribution inputs and greater robustness to adversarial attacks than
 its diagonal counterpart, which behaved much like dropout~\cite{ritter2018},
@@ -87,7 +86,7 @@ benchmark~\cite{daxberger2021}.
 
 A second route to scalability restricts inference to part of the network: subnetwork inference treats a small subset of the parameters probabilistically and leaves the rest at their MAP values; the last layer variant, which fixes the first $L-1$ layers as a feature extractor, is the special case recommended as a default because it is cheap and, for the last layer, the Hessian coincides with the generalized Gauss--Newton matrix~\cite{daxberger2021}. Neither restriction is adopted here, the networks compared in this work contain a few thousand parameters, so the full curvature matrix remains affordable, and the covariance structure can be treated as an experimental variable rather than as a concession to cost. This also keeps the comparison honest because the remaining methods place a distribution over all weights.
 
-The prior precision deserves separate treatment, since it is where the post-hoc character of the method becomes a practical freedom. Separation of training from inference means that the prior variance $\gamma^2$ entering Equation~\eqref{eq:laplace-hessian} does not need to be equal to the weight decay used during training~\cite{daxberger2021}. Ritter et al.\ exploit this by treating the prior precision and scale of the curvature factors as hyperparameters tuned in a validation set, which requires no retraining and is trivial to parallelise~\cite{ritter2018}. A principled alternative dispenses with the validation set and maximizes the Laplace approximation to the evidence, in the tradition of the MacKay framework~\cite{mackay1992}, in which the evidence also provides an objective choice of the weight decay term~\cite{daxberger2021}. The quantity being maximized is the same one that Section~\ref{subsec:gp-hyperparameters} obtained analytically for a Gaussian process in Equation~\eqref{eq:gp-marginal-likelihood}. For a network, it is itself
+The prior precision deserves separate treatment, since it is where the post-hoc character of the method becomes a practical freedom. Separation of training from inference means that the prior variance $\gamma^2$ entering Equation~\eqref{eq:laplace-hessian} does not need to be equal to the weight decay used during training~\cite{daxberger2021}. Ritter et al.\ exploit this by treating the prior precision and scale of the curvature factors as hyperparameters tuned in a validation set, which requires no retraining and is trivial to parallelise~\cite{ritter2018}. A principled alternative dispenses with the validation set and maximizes the Laplace approximation to the evidence, an approach known as empirical Bayes or the evidence framework~\cite{daxberger2021}. The quantity being maximized is the same one that Section~\ref{subsec:gp-hyperparameters} obtained analytically for a Gaussian process in Equation~\eqref{eq:gp-marginal-likelihood}. For a network, it is itself
 an approximation, which is a fair summary of the difference between the two methods.
 
 % ---------------------------------------------------------------------

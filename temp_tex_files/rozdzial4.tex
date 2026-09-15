@@ -1,0 +1,342 @@
+\chapter{Experimental setup and methodology}
+\label{ch:setup}
+
+Chapters~\ref{ch:background} and~\ref{ch:methods} presented five methods that
+approximate the same predictive integral and differ only in the way the posterior
+is approximated. This chapter describes the experimental layer that puts that
+statement to the test. The scope is deliberately narrow. The experiments are a
+demonstration of the compared methods rather than a benchmark study, so the
+protocol was designed for interpretability rather than for coverage.
+
+A comparison of posterior approximations is only meaningful if the posterior
+approximation is the only quantity that varies. The datasets, the splits, the
+preprocessing, the network architecture, the noise model, the prior and the
+optimisation settings are therefore identical for every method, and are described
+in the sections that follow. The Gaussian process is the one exception, since its
+inference is exact and it has no network architecture at all; it is treated as a
+reference point rather than as an equal participant.
+
+A deterministic network trained by MAP estimation is included alongside the five
+methods. It is not a sixth method but a lower reference for the epistemic term,
+which is exactly zero by construction. Any epistemic uncertainty reported by the
+remaining methods is thus read against a model that reports none.
+
+% =====================================================================
+\section{Experimental setup}
+\label{sec:setup-design}
+
+\subsection{Base network and training protocol}
+\label{subsec:base-network}
+
+All network-based methods share a single backbone: one hidden layer of 50 units
+with a TanH activation, a scalar mean output and one global log-variance parameter.
+The width and depth were not chosen freely. A network with one hidden layer of 50
+units is the architecture of the protocol of Hernández-Lobato and
+Adams~\cite{hernandez-lobato2015}, adopted by the works whose published results are
+used for comparison in Section~\ref{sec:results-benchmarks}.
+
+The noise model is homoscedastic for every method. A single variance parameter
+describes the whole input space, rather than an input-dependent variance produced
+by a second output head. This choice is not driven only by the Laplace implementation
+used here, which supports scalar output noise alone. With $\sigma$ independent of $x$,
+the aleatoric term cannot widen in sparsely populated regions, so it cannot absorb part
+of the epistemic term. The decomposition reported in Chapter~\ref{ch:results} is
+therefore protected by the construction of the model and not only by the estimator.
+The log-variance is clamped to $[-12, 6]$ for numerical stability, a range wide
+enough to be inactive on all datasets used. On the benchmark datasets the variance
+parameter is fitted, since the noise level there is one of the quantities every method
+has to estimate; on the synthetic problem, where the true value is known by
+construction, it is fixed to that value for the network-based methods.
+
+The prior is $\mathcal{N}(0, \gamma^2 I)$ with $\gamma = 1$ for every method. It is
+applied as an explicit penalty $\lVert \theta \rVert^2 / (2 \gamma^2 N)$ added to the
+loss, with the weight decay of the optimiser set to zero. The alternative, relying on
+the \texttt{weight\_decay} argument, would make the effective strength of the prior
+depend on the adaptive scaling of Adam and hence on the gradient history of each
+parameter. Because the libraries used express the same prior through different
+arguments --- a standard deviation, a precision or a penalty coefficient --- the
+conversion is implemented once and reused, so that the three parametrisations cannot
+drift apart. It should be noted that two methods escape this arrangement for
+structural reasons: the implied prior of MC dropout is Bernoulli, and the prior of a
+Gaussian process is placed over functions rather than over weights.
+
+Training uses Adam with a learning rate of $10^{-2}$ and a batch size of 128, shared
+by all network-based methods. The batch size is a controlled factor rather than a
+cost setting, because it fixes the number of optimiser steps per epoch and therefore
+the optimisation regime. The number of epochs was determined per dataset, as the
+smallest value from a fixed grid at which the mean validation log-likelihood of the
+slowest-converging method stopped improving. Taking the maximum over methods
+guarantees that no method is under-trained on any dataset.
+Table~\ref{tab:training-protocol} collects the resulting settings.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Shared training protocol.}
+    \label{tab:training-protocol}
+    \begin{tabular}{ll}
+        \hline
+        Setting & Value \\
+        \hline
+        Hidden layers $\times$ units & $1 \times 50$ \\
+        Activation                   & TanH \\
+        Output                       & mean, plus one global $\log \sigma^2$ \\
+        Prior                        & $\mathcal{N}(0, I)$, explicit loss penalty \\
+        Optimiser                    & Adam, learning rate $10^{-2}$ \\
+        Batch size                   & 128 \\
+        Epochs                       & per dataset, see Table~\ref{tab:epochs} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Number of training epochs used for each dataset.}
+    \label{tab:epochs}
+    \begin{tabular}{lc}
+        \hline
+        Dataset & Epochs \\
+        \hline
+        \texttt{sin\_homo}         & 2000 \\
+        \texttt{yacht}             & 2000 \\
+        \texttt{energy}            & 1000 \\
+        \texttt{concrete}          & 1000 \\
+        \texttt{wine\_quality\_red}& 20   \\
+        \texttt{kin8nm}            & 1000 \\
+        \texttt{power\_plant}      & 50   \\
+        \hline
+    \end{tabular}
+\end{table}
+
+One limitation of this rule is worth stating. On \texttt{yacht} the budget was
+capped at the value given above, because the two methods that set it move in
+opposite directions: the deterministic baseline reaches its optimum early and
+degrades afterwards, while MC dropout keeps improving to the end of every grid
+that was measured. Extending the grid would therefore raise the shared budget
+indefinitely and penalise the baseline further, so the optimum of MC dropout on
+that dataset remains unmeasured.
+
+\subsection{Method configurations}
+\label{subsec:method-configurations}
+
+Table~\ref{tab:method-config} lists the configuration of each method. Only the
+settings that are specific to a method appear there; everything shared is given in
+Table~\ref{tab:training-protocol}. Established implementations were preferred to
+custom code wherever one exists, so that each method reproduces the algorithm as
+published rather than a local variant of it.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Per-method configuration. Shared settings are omitted.}
+    \label{tab:method-config}
+    \begin{tabular}{lll}
+        \hline
+        Method & Implementation & Settings \\
+        \hline
+        MAP baseline       & custom            & deterministic, zero epistemic term \\
+        Gaussian process   & \texttt{scikit-learn} & $C \times \mathrm{RBF} + \mathrm{White}$, 5 restarts \\
+        Bayes by Backprop  & \texttt{bayesian-torch} & mean-field Gaussian, $T = 100$ \\
+        MC dropout         & custom            & $p = 0.1$, $T = 100$ \\
+        Laplace            & \texttt{laplace-torch}  & full Hessian, linearised prediction \\
+        Deep ensembles     & custom            & $M = 5$ members \\
+        \hline
+    \end{tabular}
+\end{table}
+
+The Gaussian process uses a constant kernel multiplied by a radial basis function
+kernel, with an additive white-noise term. The epistemic variance is the posterior
+variance of the latent function and the aleatoric variance is the fitted noise level,
+which is constant across the input space. Target standardisation is performed outside
+the model, identically to the networks, so that the reported log-likelihoods remain on
+the same scale.
+
+Bayes by Backprop is realised with reparameterised linear layers, which implement the
+algorithm of Blundell et al.~\cite{blundell2015} directly. The Kullback--Leibler term
+is weighted uniformly across minibatches, and the predictive moments are estimated from
+$T$ stochastic passes, with the divisor $T - 1$ in the epistemic term as in
+Equation~\eqref{eq:bbb-variance-estimator}. The data term of the objective is averaged
+over $32$ reparameterisation samples per step, in every experiment. The value is not a
+cost setting but a property of the estimate: with a single sample the variational
+standard deviations barely move from their initialisation, and raising the count to $32$
+increases the median epistemic standard deviation by a factor of roughly seven on the
+synthetic problem.
+
+MC dropout keeps the masks active at prediction time, with the dropout rate fixed at
+$p = 0.1$ and the number of passes at $T = 100$. Both values are held constant across
+all experiments, since they govern the estimate itself rather than only its cost.
+The masks are applied to the hidden activations alone, which is a deliberate departure
+from the derivation of Section~\ref{sec:mc-dropout}, where dropout precedes every
+weighted layer. On a one-dimensional input, a mask on the input layer removes the only
+feature the network has in a fraction of the forward passes, at training and at
+prediction time alike. The network compensates by inflating its noise estimate to cover
+the resulting loss spikes, so the aleatoric term absorbs an artefact of the masking
+rather than the noise of the data. Measured on the synthetic problem with the noise
+parameter left free, where the true variance is $0.01$, the mean aleatoric variance was
+$0.103$ with input dropout and $0.039$ without it. The literature-faithful variant is
+restored in the separate run that validates the implementation against published
+results, so that this departure cannot serve as an alternative explanation of any
+discrepancy found there.
+
+The Laplace approximation is fitted over all network weights, with a full covariance
+matrix and a linearised predictive distribution, following
+Equation~\eqref{eq:laplace-predictive}. The full structure is affordable here because
+the network has a few hundred parameters. The prior precision is fixed at $1/\gamma^2$
+rather than tuned by maximising the marginal likelihood; tuning it would let this one
+method adopt a prior different from the shared one, which is precisely the asymmetry
+the setup is meant to avoid.
+
+Deep ensembles consist of $M = 5$ networks that differ in their initialisation and in
+the order of their minibatches. The method therefore receives $M$ times the training
+budget of every other one. Equalising the budget would require narrowing the individual
+members and would break the agreement with the reference architecture, so the choice made
+here is one of equal architecture rather than equal computation, and the training time is
+reported as a separate metric. Adversarial training was not applied. Lakshminarayanan
+et al.~\cite{lakshminarayanan2017} report it as an optional refinement, and including
+it would add to this method a component absent from the other four. The predictive
+moments are computed with the same estimator as for Bayes by Backprop, with $T = M$.
+
+% =====================================================================
+\section{Datasets}
+\label{sec:datasets}
+
+\subsection{Synthetic problem}
+\label{subsec:synthetic-data}
+
+The synthetic problem is one-dimensional and its data-generating process is known,
+which makes it the only setting in which the estimated uncertainty can be compared
+with the truth. The target is $y = \sin(x) + \varepsilon$ with
+$\varepsilon \sim \mathcal{N}(0, 0.1^2)$. Training points are placed on a regular grid
+over $[0, 6]$ and predictions are evaluated on $[-2, 8]$, so that a substantial part of
+the evaluation range lies outside the training range. Extrapolation is thus enforced
+rather than hoped for, and the epistemic term has a region in which it is expected to
+grow. The evaluation range is symmetric about the training interval, extending two
+units beyond it on each side. An asymmetric range would let a method appear better on
+the side where it is simply closer to the data.
+
+The training set contains 250 points. A smaller set would be closer to the usual
+illustrations, but it was found to be unusable here. The network has of the order of
+one hundred and fifty parameters, so with a few dozen observations a large part of
+the parameter space receives no information from the data and remains constrained by
+the prior alone. The result is narrow spikes in the epistemic variance of the Laplace
+approximation inside the training range, which are an artefact of the sample size
+rather than a property of the method. With 250 points the effect disappears.
+
+\subsection{Benchmark datasets}
+\label{subsec:benchmark-data}
+
+Six regression datasets from the UCI repository were used, listed in
+Table~\ref{tab:datasets}. They occupy the smaller end of the collection commonly
+reported in this literature, which is a consequence of a deliberate choice: the sets
+were selected so that an exact Gaussian process remains feasible on the full training
+fold. The alternative, subsampling the data for the Gaussian process alone, would have
+placed one method on a different training set from the others.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Benchmark datasets. $N$ is the total number of observations, $N_{\mathrm{train}}$
+    the size of the training fold and $d$ the input dimensionality.}
+    \label{tab:datasets}
+    \begin{tabular}{lccc}
+        \hline
+        Dataset & $N$ & $N_{\mathrm{train}}$ & $d$ \\
+        \hline
+        \texttt{yacht}              & 308  & 277  & 6  \\
+        \texttt{energy}             & 768  & 691  & 8  \\
+        \texttt{concrete}           & 1030 & 927  & 8  \\
+        \texttt{wine\_quality\_red} & 1599 & 1439 & 11 \\
+        \texttt{kin8nm}             & 8192 & 7373 & 8  \\
+        \texttt{power\_plant}       & 9568 & 8611 & 4  \\
+        \hline
+    \end{tabular}
+\end{table}
+
+Each dataset is evaluated on the twenty random $90/10$ splits distributed with the
+reference implementation of MC dropout~\cite{gal2016}, rather than on splits generated
+here. The datasets are small enough that independently generated splits produce results
+that cannot be placed next to published ones, and the comparison in
+Section~\ref{sec:results-benchmarks} depends on that being possible. Using the
+distributed index files also settles several choices that would otherwise be arbitrary,
+among them which target variable is used for \texttt{energy} and which variant of the
+wine dataset is meant.
+
+The \texttt{boston} housing dataset appears in most published tables and was
+nevertheless omitted. It has been withdrawn from \texttt{scikit-learn} because one of
+its features encodes a racial characteristic. The consequence is stated plainly: one
+row of reference values fewer is available than in the works cited.
+
+Both the inputs and the target are standardised, with the transformation fitted on the
+training fold alone. All metrics are computed after the transformation of the target
+has been inverted, and the inversion is applied to the whole predictive distribution
+rather than to its mean, so that the reported standard deviations are also expressed in
+the original units.
+
+Exact Gaussian process inference was performed on the four smaller datasets. On
+\texttt{kin8nm} and \texttt{power\_plant} it is not reported. The method remains
+feasible at those sizes in principle, but the product of twenty splits and repeated
+restarts of the kernel optimiser raises the cost out of proportion to what the
+resulting row would add. The decision rests on a measurement rather than on an
+assertion: a single split of \texttt{kin8nm} was fitted as a cost probe and took
+$31$ minutes against a limit of twenty. The corresponding cells are marked as not run, and every
+comparative statement about the Gaussian process in Chapter~\ref{ch:results} is
+restricted to the range of $N$ in which it was actually evaluated.
+
+% =====================================================================
+\section{Evaluation metrics}
+\label{sec:metrics}
+
+Point accuracy is measured by the root mean squared error over the $n$ test points,
+%
+\begin{equation}
+    \mathrm{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} \bigl(y_i - \hat{\mu}(x_i)\bigr)^2 } ,
+    \label{eq:rmse}
+\end{equation}
+%
+which depends on the predictive mean alone and says nothing about the uncertainty. The
+quality of the full predictive distribution is measured by the average test
+log-likelihood,
+%
+\begin{equation}
+    \mathrm{LL} = \frac{1}{n} \sum_{i=1}^{n}
+      \log \mathcal{N}\!\left(y_i \mid \hat{\mu}(x_i), \hat{\sigma}^2(x_i)\right) ,
+    \label{eq:ll}
+\end{equation}
+%
+reported in the convention of the literature, in which larger values are better and the
+values themselves are negative. A model whose predictive variance is too small is
+penalised here even when its mean is accurate, which is the property that makes this
+the central metric of the comparison.
+
+Two interval metrics are reported alongside. The prediction interval coverage
+probability at the nominal level of $95\%$,
+%
+\begin{equation}
+    \mathrm{PICP} = \frac{1}{n} \sum_{i=1}^{n}
+      \mathbf{1}\!\left[ l_i \le y_i \le u_i \right] ,
+    \label{eq:picp}
+\end{equation}
+%
+gives the fraction of test targets that fall inside the interval $[l_i, u_i]$, and the
+mean prediction interval width,
+%
+\begin{equation}
+    \mathrm{MPIW} = \frac{1}{n} \sum_{i=1}^{n} (u_i - l_i) ,
+    \label{eq:mpiw}
+\end{equation}
+%
+gives its average width. Neither is informative on its own. Coverage can be raised to
+any level by widening the intervals, and narrow intervals are only a merit if the
+coverage is retained, so the two are always reported together.
+
+Training time is reported as a fourth quantity. It is not a measure of quality, but it
+is required by the budget asymmetry described in
+Section~\ref{subsec:method-configurations}: deep ensembles are trained five times over, and
+a comparison that omitted this would present the cost as free. The reported times come
+from a separate measurement run, executed sequentially on one split with the number of
+threads fixed. The times recorded during the main run are not used, because that run was
+executed in parallel and the resulting figures are inflated by the shared load.
+
+Of these quantities, RMSE and the log-likelihood are the two that appear in published
+tables and are therefore directly comparable with them. The remaining metrics extend the
+comparison but have no reference values. This division is used in
+Chapter~\ref{ch:results}: the first two columns serve to validate the implementation
+against published results for MC dropout, and the others describe behaviour for which
+this work provides the only measurements.
