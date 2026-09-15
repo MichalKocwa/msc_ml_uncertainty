@@ -83,3 +83,7 @@ cache/
 
 # MC dropout probe results - regenerable only by rerunning the probe
 !mc_dropout_experiments/results/*.csv
+
+# arch_sweep is self-contained: its results CSV and README belong with it
+!arch_sweep/results/*.csv
+!arch_sweep/README.md
